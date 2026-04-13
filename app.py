@@ -3,10 +3,13 @@ import pandas as pd
 
 st.set_page_config(layout="wide")
 
-st.title("📊 Análise de Produtos Copa Nacional")
+st.title("Análise de Produtos Copa Nacional")
 
+# =========================
+# MARCAS E ESTADOS FIXOS
+# =========================
 MARCAS = [
-"3M","HERC","KRONA","ROMA","DINAIDER","SCHNEIDER","STECK",
+"3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
 "MISTER ABRASIVOS","MISTER ELETRICOS","MISTER FERRAMENTAS",
 "MISTER GERAL","MISTER PARAFUSOS"
 ]
@@ -22,53 +25,49 @@ if file:
 
     df = pd.read_excel(file)
 
-    df = df.dropna(subset=["UF","Marca","Cod Produto","Produto","Mes","Valor","Qtd","Pedidos"])
+    # =========================
+    # LIMPEZA SEGURA
+    # =========================
+    df.columns = df.columns.str.strip()
 
+    df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
+    df["UF"] = df["UF"].astype(str).str.strip().str.upper()
+
+    # normaliza espaços duplos
+    df["Marca"] = df["Marca"].str.replace(r"\s+", " ", regex=True)
+
+    # força marca correta
+    df["Marca"] = df["Marca"].replace({
+        "DINAIDER SCHNEIDER": "DINAIDER SCHNEIDER"
+    })
+
+    # filtros base
     df = df[df["Marca"].isin(MARCAS)]
     df = df[df["UF"].isin(ESTADOS)]
 
-    # transforma mês em ordenável
-    df["Mes"] = df["Mes"].astype(str)
+    # =========================
+    # FUNÇÃO AUXILIAR
+    # =========================
+    def label(row):
+        return f"{row['Cod']} - {row['Produto']}"
 
     # =========================
-    # FUNÇÕES AUX
+    # ⚡ TOP FATURAMENTO
     # =========================
-
-    def cod_prod(row):
-        return f"{row['Cod Produto']} - {row['Produto']}"
-
-    # =========================
-    # TOP FATURAMENTO
-    # =========================
-    def top_faturamento(df_uf):
-
-        df_3m = df_uf.copy()
-
-        top = df_3m.groupby(["Marca","Cod Produto","Produto","Mes"]).agg(
-            Valor=("Valor","sum")
-        ).reset_index()
-
-        # soma total por produto
-        top = top.groupby(["Marca","Cod Produto","Produto"]).agg(
-            Valor=("Valor","sum")
-        ).reset_index()
-
-        # ranking
-        top = top.sort_values("Valor", ascending=False)
-
-        return top
-
+    def top_faturamento(d):
+        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+        x = x.sort_values("Valor", ascending=False)
+        x = x.groupby(["UF","Marca"]).head(1)
+        return x
 
     # =========================
-    # PRODUTO DA VEZ (crescimento)
+    # 🚀 PRODUTO DA VEZ
     # =========================
-    def produto_vez(df_uf):
+    def produto_vez(d):
 
-        monthly = df_uf.groupby(["Mes","Marca","Cod Produto","Produto"]).agg(
-            Valor=("Valor","sum")
-        ).reset_index()
+        x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
-        meses = sorted(monthly["Mes"].unique())
+        meses = sorted(x["Mes"].unique())
 
         if len(meses) < 2:
             return pd.DataFrame()
@@ -76,42 +75,45 @@ if file:
         atual = meses[-1]
         anterior = meses[-2]
 
-        atual_df = monthly[monthly["Mes"] == atual]
-        anterior_df = monthly[monthly["Mes"] == anterior]
+        a = x[x["Mes"] == atual]
+        b = x[x["Mes"] == anterior]
 
-        merged = pd.merge(
-            atual_df,
-            anterior_df,
-            on=["Marca","Cod Produto","Produto"],
+        m = a.merge(
+            b,
+            on=["UF","Marca","Cod","Produto"],
             how="left",
             suffixes=("_atual","_ant")
         )
 
-        merged["ant"] = merged["Valor_ant"].fillna(0)
-        merged["crescimento"] = merged["Valor_atual"] - merged["ant"]
+        m["Valor_ant"] = m["Valor_ant"].fillna(0)
+        m["crescimento"] = m["Valor_atual"] - m["Valor_ant"]
 
-        merged = merged.sort_values(["Valor_atual","crescimento"], ascending=False)
+        m = m.sort_values(["Valor_atual","crescimento"], ascending=False)
 
-        return merged
+        m = m.groupby(["UF","Marca"]).head(1)
 
-
-    # =========================
-    # OPORTUNIDADE
-    # =========================
-    def oportunidade(df_uf):
-
-        opp = df_uf.groupby(["Marca","Cod Produto","Produto"]).agg(
-            Pedidos=("Pedidos","sum"),
-            Qtd=("Qtd","sum")
-        ).reset_index()
-
-        opp["Score"] = opp["Pedidos"] / (opp["Qtd"] + 1)
-
-        return opp.sort_values("Score", ascending=False)
-
+        return m
 
     # =========================
-    # RENDER POR UF
+    # 🟢 OPORTUNIDADE
+    # =========================
+    def oportunidade(d):
+
+        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False).agg({
+            "Pedidos":"sum",
+            "Qtd":"sum"
+        })
+
+        x["Score"] = x["Pedidos"] / (x["Qtd"] + 1)
+
+        x = x.sort_values("Score", ascending=False)
+
+        x = x.groupby(["UF","Marca"]).head(1)
+
+        return x
+
+    # =========================
+    # RENDER POR ESTADO
     # =========================
     def render(uf):
 
@@ -119,43 +121,44 @@ if file:
 
         d = df[df["UF"] == uf]
 
-        # -------- TOP FAT --------
-        top = top_faturamento(d).groupby(["Marca"]).head(1)
+        # TOP
+        top = top_faturamento(d)
+        top["Top"] = top.apply(label, axis=1)
 
-        top["ProdutoFinal"] = top.apply(cod_prod, axis=1)
-        top["Icone"] = "💰💰💰 ⚡ Top Faturamento"
-
-        # -------- PRODUTO VEZ --------
+        # VEZ
         hot = produto_vez(d)
-
         if not hot.empty:
-            hot["ProdutoFinal"] = hot.apply(lambda x: f"{x['Cod Produto']} - {x['Produto']}", axis=1)
-            hot["Icone"] = "🔥🚀 Produto da Vez"
+            hot["Hot"] = hot.apply(label, axis=1)
 
-            hot = hot.groupby(["Marca"]).head(1)
-
-        # -------- OPORTUNIDADE --------
+        # OPORTUNIDADE
         opp = oportunidade(d)
-        opp = opp.groupby(["Marca"]).head(1)
+        opp["Opp"] = opp.apply(label, axis=1)
 
-        opp["ProdutoFinal"] = opp.apply(lambda x: f"{x['Cod Produto']} - {x['Produto']}", axis=1)
-        opp["Icone"] = "💵🟢 Oportunidade"
-
-        # -------- MERGE VISUAL --------
         marcas = pd.DataFrame({"Marca": MARCAS})
 
-        final = marcas.merge(top[["Marca","ProdutoFinal","Icone"]], on="Marca", how="left")
-        final = final.rename(columns={"ProdutoFinal":"⚡ Top Faturamento"})
+        final = marcas.merge(
+            top[["UF","Marca","Top"]],
+            on="Marca",
+            how="left"
+        )
 
         final = final.merge(
-            hot[["Marca","ProdutoFinal"]],
-            on="Marca", how="left"
-        ).rename(columns={"ProdutoFinal":"🔥 Produto da Vez"})
+            hot[["Marca","Hot"]],
+            on="Marca",
+            how="left"
+        )
 
         final = final.merge(
-            opp[["Marca","ProdutoFinal"]],
-            on="Marca", how="left"
-        ).rename(columns={"ProdutoFinal":"💵 Oportunidade"})
+            opp[["Marca","Opp"]],
+            on="Marca",
+            how="left"
+        )
+
+        final = final.rename(columns={
+            "Top":"⚡ 💰 Top Faturamento",
+            "Hot":"🔥🚀 Produto da Vez",
+            "Opp":"💵🟢 Oportunidade"
+        })
 
         st.dataframe(final, use_container_width=True)
 
@@ -165,15 +168,3 @@ if file:
     render("RS")
     render("SC")
     render("PR")
-
-
-    # =========================
-    # DOWNLOAD
-    # =========================
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "📥 Baixar base tratada",
-        csv,
-        "relatorio_copa_nacional.csv",
-        "text/csv"
-    )
