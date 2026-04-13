@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# TEXTO ÚNICO (EXATAMENTE O QUE VOCÊ QUER)
+# TEXTO ÚNICO (SEM DUPLICAÇÃO)
 # =========================
 st.markdown("""
 ### 📌 Categorias
@@ -31,7 +31,7 @@ ESTADOS = ["RS","SC","PR"]
 file = st.file_uploader("📂 Envie sua base Excel")
 
 # =========================
-# EXPORT EXCEL
+# EXCEL EXPORT
 # =========================
 def gerar_excel(rs, sc, pr):
     output = BytesIO()
@@ -47,8 +47,6 @@ def gerar_excel(rs, sc, pr):
 if file:
 
     df = pd.read_excel(file)
-
-    # limpeza
     df.columns = df.columns.str.strip()
 
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
@@ -72,16 +70,33 @@ if file:
         return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # TOP FATURAMENTO (ROBUSTO)
+    # TOP FATURAMENTO (3 MESES + ATUAL)
     # =========================
     def top_faturamento(d):
-        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-        if x.empty:
-            return x
-        return x.sort_values("Valor", ascending=False)
+
+        x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+        meses = sorted(x["Mes"].unique())
+
+        if len(meses) < 2:
+            return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        ultimos = meses[-4:]  # 3 anteriores + atual
+
+        base = x[x["Mes"].isin(ultimos)]
+
+        resumo = base.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        atual = x[x["Mes"] == meses[-1]].groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        merged = resumo.merge(atual, on=["UF","Marca","Cod","Produto"], how="left", suffixes=("_hist","_atual"))
+        merged["Valor_atual"] = merged["Valor_atual"].fillna(0)
+
+        merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+
+        return merged.sort_values("score", ascending=False)
 
     # =========================
-    # PRODUTO DA VEZ (CRESCIMENTO)
+    # PRODUTO DA VEZ (CRESCIMENTO REAL)
     # =========================
     def produto_vez(d):
 
@@ -97,31 +112,28 @@ if file:
         a = x[x["Mes"] == atual]
         b = x[x["Mes"] == ant]
 
-        m = a.merge(
-            b,
-            on=["UF","Marca","Cod","Produto"],
-            how="left",
-            suffixes=("_a","_b")
-        )
-
+        m = a.merge(b, on=["UF","Marca","Cod","Produto"], how="left", suffixes=("_a","_b"))
         m["Valor_b"] = m["Valor_b"].fillna(0)
-        m["crescimento"] = m["Valor_a"] - m["Valor_b"]
 
-        return m.sort_values(["Valor_a","crescimento"], ascending=False)
+        m["crescimento_abs"] = m["Valor_a"] - m["Valor_b"]
+        m["crescimento_pct"] = m["crescimento_abs"] / (m["Valor_b"] + 1)
+
+        return m.sort_values(["crescimento_pct","Valor_a"], ascending=False)
 
     # =========================
-    # OPORTUNIDADE
+    # OPORTUNIDADE (EFICIÊNCIA)
     # =========================
     def oportunidade(d):
 
         x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False).agg({
             "Pedidos":"sum",
-            "Qtd":"sum"
+            "Qtd":"sum",
+            "Valor":"sum"
         })
 
-        x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
+        x["eficiencia"] = x["Pedidos"] / (x["Qtd"] + 1)
 
-        return x.sort_values("score", ascending=False)
+        return x.sort_values("eficiencia", ascending=False)
 
     # =========================
     # RENDER
@@ -131,7 +143,6 @@ if file:
         st.markdown(f"## {uf}")
 
         d = df[df["UF"] == uf]
-
         marcas = pd.DataFrame({"Marca": MARCAS})
 
         top = top_faturamento(d)
