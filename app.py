@@ -12,7 +12,7 @@ st.title("Análise de Produtos Copa Nacional")
 st.markdown("""
 ### 📌 Regras do sistema
 
-💰 Top Faturamento → produto forte nos últimos 3 meses + ativo no mês atual  
+💰 Top Faturamento → forte nos últimos 3 meses + ativo no mês atual  
 🔥 Produto da Vez → segundo melhor produto (não repete o Top)  
 💵 Oportunidade → muitos pedidos com baixa eficiência de volume
 """)
@@ -51,7 +51,7 @@ if file:
     df = pd.read_excel(file)
 
     # =========================
-    # LIMPEZA SEGURA
+    # LIMPEZA + CONSOLIDAÇÃO (ESSENCIAL)
     # =========================
     df.columns = df.columns.str.strip()
 
@@ -62,7 +62,6 @@ if file:
     df = df[df["UF"].isin(ESTADOS)]
     df = df[df["Marca"].isin(MARCAS)]
 
-    # 🔥 CONSOLIDA DUPLICADOS (ESSENCIAL)
     df = df.groupby(
         ["UF","Marca","Cod","Produto","Mes"],
         as_index=False
@@ -137,7 +136,6 @@ if file:
 
         m = m.sort_values(["Valor_atual","crescimento"], ascending=False)
 
-        # remove Top Faturamento
         top = top_faturamento(d)
 
         top_keys = set(zip(
@@ -166,7 +164,7 @@ if file:
         return x.sort_values("Score", ascending=False)
 
     # =========================
-    # RENDER SIMPLES (SEM QUEBRAR NADA)
+    # RENDER (SEM RANKING VISÍVEL)
     # =========================
     def render(uf):
 
@@ -193,9 +191,21 @@ if file:
         final = final.merge(hot[["Marca","VAL"]], on="Marca", how="left")
         final = final.merge(opp[["Marca","VAL"]], on="Marca", how="left")
 
-        final.columns = ["Marca","Top Faturamento","Produto da Vez","Oportunidade"]
+        final.columns = [
+            "Marca",
+            "💰 Top Faturamento",
+            "🔥 Produto da Vez",
+            "💵 Oportunidade"
+        ]
 
-        st.dataframe(final, use_container_width=True)
+        final = final.fillna("—")
+
+        # ✔ SEM RANKING VISÍVEL
+        st.dataframe(
+            final,
+            use_container_width=True,
+            hide_index=True
+        )
 
         return final
 
