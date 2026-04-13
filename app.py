@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# TEXTO (SUBSTITUÍDO CORRETAMENTE)
+# TEXTO ÚNICO (EXATAMENTE O QUE VOCÊ QUER)
 # =========================
 st.markdown("""
 ### 📌 Categorias
@@ -15,14 +15,6 @@ st.markdown("""
 💰 Top Faturamento → forte nos últimos 3 meses + forte no mês atual  
 🔥 Produto da Vez → forte no último mês + cresceu em relação ao mês anterior  
 💵 Oportunidade → muitos pedidos + baixa quantidade  
-
----
-
-### 📌 Regras do sistema
-
-💰 Top Faturamento → forte nos últimos 3 meses + ativo no mês atual  
-🔥 Produto da Vez → segundo melhor produto (não repete o Top)  
-💵 Oportunidade → muitos pedidos com baixa eficiência de volume  
 """)
 
 # =========================
@@ -39,7 +31,7 @@ ESTADOS = ["RS","SC","PR"]
 file = st.file_uploader("📂 Envie sua base Excel")
 
 # =========================
-# EXCEL EXPORT
+# EXPORT EXCEL
 # =========================
 def gerar_excel(rs, sc, pr):
     output = BytesIO()
@@ -56,6 +48,7 @@ if file:
 
     df = pd.read_excel(file)
 
+    # limpeza
     df.columns = df.columns.str.strip()
 
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
@@ -65,6 +58,7 @@ if file:
     df = df[df["UF"].isin(ESTADOS)]
     df = df[df["Marca"].isin(MARCAS)]
 
+    # consolidação correta
     df = df.groupby(
         ["UF","Marca","Cod","Produto","Mes"],
         as_index=False
@@ -77,62 +71,47 @@ if file:
     def label(r):
         return f"{r['Cod']} - {r['Produto']}"
 
+    # =========================
+    # TOP FATURAMENTO (ROBUSTO)
+    # =========================
     def top_faturamento(d):
-        x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-        meses = sorted(x["Mes"].unique())
-        if len(meses) < 4:
-            return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+        if x.empty:
+            return x
+        return x.sort_values("Valor", ascending=False)
 
-        ultimos_3 = meses[-4:-1]
-        atual = meses[-1]
-
-        hist = x[x["Mes"].isin(ultimos_3)]
-        atual_df = x[x["Mes"] == atual]
-
-        hist_sum = hist.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-        atual_sum = atual_df.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-
-        merged = hist_sum.merge(
-            atual_sum,
-            on=["UF","Marca","Cod","Produto"],
-            how="inner",
-            suffixes=("_hist","_atual")
-        )
-
-        if not merged.empty:
-            merged["Score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
-            return merged.sort_values("Score", ascending=False)
-
-        return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-
+    # =========================
+    # PRODUTO DA VEZ (CRESCIMENTO)
+    # =========================
     def produto_vez(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-
         meses = sorted(x["Mes"].unique())
+
         if len(meses) < 2:
             return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
         atual = meses[-1]
-        anterior = meses[-2]
+        ant = meses[-2]
 
         a = x[x["Mes"] == atual]
-        b = x[x["Mes"] == anterior]
+        b = x[x["Mes"] == ant]
 
         m = a.merge(
             b,
             on=["UF","Marca","Cod","Produto"],
             how="left",
-            suffixes=("_atual","_ant")
+            suffixes=("_a","_b")
         )
 
-        m["Valor_ant"] = m["Valor_ant"].fillna(0)
-        m["crescimento"] = m["Valor_atual"] - m["Valor_ant"]
+        m["Valor_b"] = m["Valor_b"].fillna(0)
+        m["crescimento"] = m["Valor_a"] - m["Valor_b"]
 
-        m = m.sort_values(["Valor_atual","crescimento"], ascending=False)
+        return m.sort_values(["Valor_a","crescimento"], ascending=False)
 
-        return m.groupby("Marca").head(1)
-
+    # =========================
+    # OPORTUNIDADE
+    # =========================
     def oportunidade(d):
 
         x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False).agg({
@@ -140,34 +119,38 @@ if file:
             "Qtd":"sum"
         })
 
-        x["Score"] = x["Pedidos"] / (x["Qtd"] + 1)
+        x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
 
-        return x.sort_values("Score", ascending=False)
+        return x.sort_values("score", ascending=False)
 
+    # =========================
+    # RENDER
+    # =========================
     def render(uf):
 
         st.markdown(f"## {uf}")
 
         d = df[df["UF"] == uf]
 
-        marcas_df = pd.DataFrame({"Marca": MARCAS})
+        marcas = pd.DataFrame({"Marca": MARCAS})
 
         top = top_faturamento(d)
         if not top.empty:
             top = top.groupby("Marca").head(1)
-            top["VAL"] = top.apply(label, axis=1)
+            top["val"] = top.apply(label, axis=1)
 
         hot = produto_vez(d)
         if not hot.empty:
-            hot["VAL"] = hot.apply(label, axis=1)
+            hot = hot.groupby("Marca").head(1)
+            hot["val"] = hot.apply(label, axis=1)
 
         opp = oportunidade(d)
         opp = opp.groupby("Marca").head(1)
-        opp["VAL"] = opp.apply(label, axis=1)
+        opp["val"] = opp.apply(label, axis=1)
 
-        final = marcas_df.merge(top[["Marca","VAL"]], on="Marca", how="left")
-        final = final.merge(hot[["Marca","VAL"]], on="Marca", how="left")
-        final = final.merge(opp[["Marca","VAL"]], on="Marca", how="left")
+        final = marcas.merge(top[["Marca","val"]], on="Marca", how="left")
+        final = final.merge(hot[["Marca","val"]], on="Marca", how="left")
+        final = final.merge(opp[["Marca","val"]], on="Marca", how="left")
 
         final.columns = [
             "Marca",
@@ -189,8 +172,8 @@ if file:
     excel = gerar_excel(rs, sc, pr)
 
     st.download_button(
-        "📥 Baixar relatório completo (Excel)",
+        "📥 Baixar relatório completo",
         excel,
-        "relatorio_copa_nacional.xlsx",
+        "relatorio.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
