@@ -23,16 +23,27 @@ def render(uf):
     final = final.merge(hot[["Marca","VAL"]], on="Marca", how="left")
     final = final.merge(opp[["Marca","VAL"]], on="Marca", how="left")
 
-    final.columns = ["Marca","Top Faturamento","Produto da Vez","Oportunidade"]
-
-    # 🔥 remove NaN visual (evita bug de render)
     final = final.fillna("—")
 
-    # 🔥 deixa mais compacto e sem “cara de planilha gigante”
-    st.dataframe(
-        final,
-        use_container_width=True,
-        height=420  # controla scroll (não some, mas fica pequeno)
-    )
+    # =========================
+    # CARDS (SEM SCROLL)
+    # =========================
+    for _, row in final.iterrows():
 
-    return final
+        st.markdown(
+            f"""
+            <div style="
+                border:1px solid #ddd;
+                border-radius:10px;
+                padding:10px;
+                margin-bottom:10px;
+            ">
+                <b>{row['Marca']}</b><br><br>
+
+                💰 Top Faturamento: {row['Top Faturamento']}<br>
+                🔥 Produto da Vez: {row['Produto da Vez']}<br>
+                💵 Oportunidade: {row['Oportunidade']}
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
