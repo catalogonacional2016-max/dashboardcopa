@@ -6,7 +6,24 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# MARCAS E ESTADOS FIXOS
+# EXPLICAÇÃO
+# =========================
+st.markdown("""
+### 📌 Como as categorias são calculadas
+
+💰 **Top Faturamento**  
+Produto com bom desempenho nos últimos 3 meses E que continua vendendo no mês atual.
+
+🔥 **Produto da Vez**  
+Produto com maior crescimento entre mês atual vs mês anterior.  
+Se for igual ao Top Faturamento, traz o 2º colocado.
+
+💵 **Oportunidade**  
+Produtos com muitos pedidos, mas baixo volume vendido (eficiência de vendas).
+""")
+
+# =========================
+# CONFIGURAÇÕES
 # =========================
 MARCAS = [
 "3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
@@ -26,54 +43,67 @@ if file:
     df = pd.read_excel(file)
 
     # =========================
-    # LIMPEZA SEGURA
+    # LIMPEZA
     # =========================
     df.columns = df.columns.str.strip()
 
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
     df["UF"] = df["UF"].astype(str).str.strip().str.upper()
-
-    # normaliza espaços duplos
     df["Marca"] = df["Marca"].str.replace(r"\s+", " ", regex=True)
 
-    # força marca correta
-    df["Marca"] = df["Marca"].replace({
-        "DINAIDER SCHNEIDER": "DINAIDER SCHNEIDER"
-    })
-
-    # filtros base
-    df = df[df["Marca"].isin(MARCAS)]
     df = df[df["UF"].isin(ESTADOS)]
+    df = df[df["Marca"].isin(MARCAS)]
 
     # =========================
-    # FUNÇÃO AUXILIAR
+    # LABEL
     # =========================
-    def label(row):
-        return f"{row['Cod']} - {row['Produto']}"
+    def label(r):
+        return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # ⚡ TOP FATURAMENTO
+    # 💰 TOP FATURAMENTO (CORRETO)
     # =========================
     def top_faturamento(d):
-        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-        x = x.sort_values("Valor", ascending=False)
-        x = x.groupby(["UF","Marca"]).head(1)
-        return x
+
+        x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        meses = sorted(x["Mes"].unique())
+
+        if len(meses) < 4:
+            return pd.DataFrame()
+
+        ultimos_3 = meses[-4:-1]
+        atual = meses[-1]
+
+        hist = x[x["Mes"].isin(ultimos_3)]
+        atual_df = x[x["Mes"] == atual]
+
+        hist_sum = hist.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+        atual_sum = atual_df.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        merged = hist_sum.merge(
+            atual_sum,
+            on=["UF","Marca","Cod","Produto"],
+            how="inner",
+            suffixes=("_hist","_atual")
+        )
+
+        merged["Score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+
+        return merged.sort_values("Score", ascending=False)
 
     # =========================
-    # 🚀 PRODUTO DA VEZ
+    # 🔥 PRODUTO DA VEZ
     # =========================
     def produto_vez(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
         meses = sorted(x["Mes"].unique())
-
         if len(meses) < 2:
             return pd.DataFrame()
 
-        atual = meses[-1]
-        anterior = meses[-2]
+        atual, anterior = meses[-1], meses[-2]
 
         a = x[x["Mes"] == atual]
         b = x[x["Mes"] == anterior]
@@ -90,12 +120,12 @@ if file:
 
         m = m.sort_values(["Valor_atual","crescimento"], ascending=False)
 
-        m = m.groupby(["UF","Marca"]).head(1)
+        m = m.groupby(["UF","Marca"]).head(2)
 
         return m
 
     # =========================
-    # 🟢 OPORTUNIDADE
+    # 💵 OPORTUNIDADE
     # =========================
     def oportunidade(d):
 
@@ -106,14 +136,10 @@ if file:
 
         x["Score"] = x["Pedidos"] / (x["Qtd"] + 1)
 
-        x = x.sort_values("Score", ascending=False)
-
-        x = x.groupby(["UF","Marca"]).head(1)
-
-        return x
+        return x.sort_values("Score", ascending=False)
 
     # =========================
-    # RENDER POR ESTADO
+    # RENDER
     # =========================
     def render(uf):
 
@@ -121,50 +147,55 @@ if file:
 
         d = df[df["UF"] == uf]
 
-        # TOP
-        top = top_faturamento(d)
-        top["Top"] = top.apply(label, axis=1)
+        marcas_df = pd.DataFrame({
+            "Nº": range(1, len(MARCAS)+1),
+            "Marca": MARCAS
+        })
 
-        # VEZ
+        # TOP FATURAMENTO
+        top = top_faturamento(d)
+        if not top.empty:
+            top = top.groupby(["Marca"]).head(1)
+            top["VAL"] = top.apply(label, axis=1)
+
+        # PRODUTO DA VEZ
         hot = produto_vez(d)
         if not hot.empty:
-            hot["Hot"] = hot.apply(label, axis=1)
+            hot["VAL"] = hot.apply(label, axis=1)
+            hot = hot.groupby(["Marca"]).head(1)
 
         # OPORTUNIDADE
         opp = oportunidade(d)
-        opp["Opp"] = opp.apply(label, axis=1)
+        opp = opp.groupby(["Marca"]).head(1)
+        opp["VAL"] = opp.apply(label, axis=1)
 
-        marcas = pd.DataFrame({"Marca": MARCAS})
-
-        final = marcas.merge(
-            top[["UF","Marca","Top"]],
-            on="Marca",
-            how="left"
-        )
-
-        final = final.merge(
-            hot[["Marca","Hot"]],
-            on="Marca",
-            how="left"
-        )
-
-        final = final.merge(
-            opp[["Marca","Opp"]],
-            on="Marca",
-            how="left"
-        )
-
-        final = final.rename(columns={
-            "Top":"⚡ 💰 Top Faturamento",
-            "Hot":"🔥🚀 Produto da Vez",
-            "Opp":"💵🟢 Oportunidade"
-        })
+        final = marcas_df.merge(top[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"💰 Top Faturamento"})
+        final = final.merge(hot[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"🔥 Produto da Vez"})
+        final = final.merge(opp[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"💵 Oportunidade"})
 
         st.dataframe(final, use_container_width=True)
+
+        return final
 
     # =========================
     # EXECUTA
     # =========================
-    render("RS")
-    render("SC")
-    render("PR")
+    rs = render("RS")
+    sc = render("SC")
+    pr = render("PR")
+
+    # =========================
+    # DOWNLOAD
+    # =========================
+    full = pd.concat([
+        rs.assign(UF="RS"),
+        sc.assign(UF="SC"),
+        pr.assign(UF="PR")
+    ])
+
+    st.download_button(
+        "📥 Baixar relatório completo",
+        full.to_csv(index=False).encode("utf-8"),
+        "relatorio_copa_nacional.csv",
+        "text/csv"
+    )
