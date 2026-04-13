@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# TEXTO ÚNICO (SEM DUPLICAÇÃO)
+# TEXTO ÚNICO
 # =========================
 st.markdown("""
 ### 📌 Categorias
@@ -30,8 +30,9 @@ ESTADOS = ["RS","SC","PR"]
 
 file = st.file_uploader("📂 Envie sua base Excel")
 
+
 # =========================
-# EXCEL EXPORT
+# EXPORT EXCEL
 # =========================
 def gerar_excel(rs, sc, pr):
     output = BytesIO()
@@ -40,6 +41,29 @@ def gerar_excel(rs, sc, pr):
         sc.to_excel(writer, index=False, sheet_name="SC")
         pr.to_excel(writer, index=False, sheet_name="PR")
     return output.getvalue()
+
+
+# =========================
+# FUNÇÃO: FALLBACK POR RANKING (NÃO MUDA REGRA, SÓ ESCOLHE PRÓXIMO)
+# =========================
+def pick_best(df, group="Marca", score_col=None):
+
+    if df.empty:
+        return df
+
+    if score_col is None:
+        score_col = df.columns[-1]
+
+    df = df.sort_values(score_col, ascending=False)
+
+    result = []
+    for m in df[group].unique():
+        sub = df[df[group] == m]
+        if not sub.empty:
+            result.append(sub.head(1))
+
+    return pd.concat(result) if result else df
+
 
 # =========================
 # APP
@@ -56,7 +80,6 @@ if file:
     df = df[df["UF"].isin(ESTADOS)]
     df = df[df["Marca"].isin(MARCAS)]
 
-    # consolidação correta
     df = df.groupby(
         ["UF","Marca","Cod","Produto","Mes"],
         as_index=False
@@ -70,7 +93,7 @@ if file:
         return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # TOP FATURAMENTO (3 MESES + ATUAL)
+    # TOP FATURAMENTO (REGRA ORIGINAL + SCORE)
     # =========================
     def top_faturamento(d):
 
@@ -78,9 +101,10 @@ if file:
         meses = sorted(x["Mes"].unique())
 
         if len(meses) < 2:
-            return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            base = x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            return base
 
-        ultimos = meses[-4:]  # 3 anteriores + atual
+        ultimos = meses[-4:]
 
         base = x[x["Mes"].isin(ultimos)]
 
@@ -93,10 +117,11 @@ if file:
 
         merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
 
-        return merged.sort_values("score", ascending=False)
+        return pick_best(merged, "Marca", "score")
+
 
     # =========================
-    # PRODUTO DA VEZ (CRESCIMENTO REAL)
+    # PRODUTO DA VEZ (CRESCIMENTO)
     # =========================
     def produto_vez(d):
 
@@ -104,24 +129,22 @@ if file:
         meses = sorted(x["Mes"].unique())
 
         if len(meses) < 2:
-            return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            base = x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            return base
 
-        atual = meses[-1]
-        ant = meses[-2]
+        atual = x[x["Mes"] == meses[-1]]
+        ant = x[x["Mes"] == meses[-2]]
 
-        a = x[x["Mes"] == atual]
-        b = x[x["Mes"] == ant]
-
-        m = a.merge(b, on=["UF","Marca","Cod","Produto"], how="left", suffixes=("_a","_b"))
+        m = atual.merge(ant, on=["UF","Marca","Cod","Produto"], how="left", suffixes=("_a","_b"))
         m["Valor_b"] = m["Valor_b"].fillna(0)
 
-        m["crescimento_abs"] = m["Valor_a"] - m["Valor_b"]
-        m["crescimento_pct"] = m["crescimento_abs"] / (m["Valor_b"] + 1)
+        m["crescimento"] = m["Valor_a"] - m["Valor_b"]
 
-        return m.sort_values(["crescimento_pct","Valor_a"], ascending=False)
+        return pick_best(m, "Marca", "crescimento")
+
 
     # =========================
-    # OPORTUNIDADE (EFICIÊNCIA)
+    # OPORTUNIDADE
     # =========================
     def oportunidade(d):
 
@@ -131,9 +154,10 @@ if file:
             "Valor":"sum"
         })
 
-        x["eficiencia"] = x["Pedidos"] / (x["Qtd"] + 1)
+        x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
 
-        return x.sort_values("eficiencia", ascending=False)
+        return pick_best(x, "Marca", "score")
+
 
     # =========================
     # RENDER
@@ -156,8 +180,9 @@ if file:
             hot["val"] = hot.apply(label, axis=1)
 
         opp = oportunidade(d)
-        opp = opp.groupby("Marca").head(1)
-        opp["val"] = opp.apply(label, axis=1)
+        if not opp.empty:
+            opp = opp.groupby("Marca").head(1)
+            opp["val"] = opp.apply(label, axis=1)
 
         final = marcas.merge(top[["Marca","val"]], on="Marca", how="left")
         final = final.merge(hot[["Marca","val"]], on="Marca", how="left")
@@ -175,6 +200,7 @@ if file:
         st.dataframe(final, use_container_width=True, hide_index=True)
 
         return final
+
 
     rs = render("RS")
     sc = render("SC")
