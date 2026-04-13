@@ -25,30 +25,14 @@ def render(uf):
 
     final.columns = ["Marca","Top Faturamento","Produto da Vez","Oportunidade"]
 
-    # 🚨 REMOVE QUALQUER CARA DE TABELA (SEM SCROLL)
-    html = final.to_html(index=False, escape=False)
+    # 🔥 remove NaN visual (evita bug de render)
+    final = final.fillna("—")
 
-    st.markdown(
-        f"""
-        <style>
-        table {{
-            width: 100%;
-            border-collapse: collapse;
-        }}
-        th {{
-            background-color: #111;
-            color: white;
-            padding: 8px;
-            text-align: left;
-        }}
-        td {{
-            padding: 8px;
-            border-bottom: 1px solid #ddd;
-        }}
-        </style>
-        {html}
-        """,
-        unsafe_allow_html=True
+    # 🔥 deixa mais compacto e sem “cara de planilha gigante”
+    st.dataframe(
+        final,
+        use_container_width=True,
+        height=420  # controla scroll (não some, mas fica pequeno)
     )
 
     return final
