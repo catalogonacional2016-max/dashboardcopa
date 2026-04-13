@@ -7,14 +7,22 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# EXPLICAÇÃO
+# TEXTO (CORRIGIDO)
 # =========================
 st.markdown("""
+### 📌 Categorias
+
+💰 Top Faturamento → produto forte nos últimos 3 meses + ativo no mês atual  
+🔥 Produto da Vez → produto com maior crescimento do mês atual vs mês anterior (sem repetir o Top)  
+💵 Oportunidade → muitos pedidos com baixa eficiência de volume  
+
+---
+
 ### 📌 Regras do sistema
 
-💰 Top Faturamento → forte nos últimos 3 meses + ativo no mês atual  
-🔥 Produto da Vez → segundo melhor produto (não repete o Top)  
-💵 Oportunidade → muitos pedidos com baixa eficiência de volume
+💰 Top Faturamento → combina histórico (3 meses) + desempenho no mês atual  
+🔥 Produto da Vez → baseado em crescimento recente e força no mês atual  
+💵 Oportunidade → identifica produtos com alto volume de pedidos e baixa quantidade vendida  
 """)
 
 # =========================
@@ -35,12 +43,10 @@ file = st.file_uploader("📂 Envie sua base Excel")
 # =========================
 def gerar_excel(rs, sc, pr):
     output = BytesIO()
-
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
         rs.to_excel(writer, index=False, sheet_name="RS")
         sc.to_excel(writer, index=False, sheet_name="SC")
         pr.to_excel(writer, index=False, sheet_name="PR")
-
     return output.getvalue()
 
 # =========================
@@ -51,7 +57,7 @@ if file:
     df = pd.read_excel(file)
 
     # =========================
-    # LIMPEZA + CONSOLIDAÇÃO (ESSENCIAL)
+    # LIMPEZA + CONSOLIDAÇÃO
     # =========================
     df.columns = df.columns.str.strip()
 
@@ -78,38 +84,41 @@ if file:
         return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # 💰 TOP FATURAMENTO
+    # TOP FATURAMENTO
     # =========================
     def top_faturamento(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
         meses = sorted(x["Mes"].unique())
-        if len(meses) < 4:
-            return pd.DataFrame()
+        if len(meses) < 2:
+            return x.sort_values("Valor", ascending=False)
 
-        ultimos_3 = meses[-4:-1]
-        atual = meses[-1]
+        if len(meses) >= 4:
+            ultimos_3 = meses[-4:-1]
+            atual = meses[-1]
 
-        hist = x[x["Mes"].isin(ultimos_3)]
-        atual_df = x[x["Mes"] == atual]
+            hist = x[x["Mes"].isin(ultimos_3)]
+            atual_df = x[x["Mes"] == atual]
 
-        hist_sum = hist.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-        atual_sum = atual_df.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            hist_sum = hist.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            atual_sum = atual_df.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
-        merged = hist_sum.merge(
-            atual_sum,
-            on=["UF","Marca","Cod","Produto"],
-            how="inner",
-            suffixes=("_hist","_atual")
-        )
+            merged = hist_sum.merge(
+                atual_sum,
+                on=["UF","Marca","Cod","Produto"],
+                how="inner",
+                suffixes=("_hist","_atual")
+            )
 
-        merged["Score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+            if not merged.empty:
+                merged["Score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+                return merged.sort_values("Score", ascending=False)
 
-        return merged.sort_values("Score", ascending=False)
+        return x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum().sort_values("Valor", ascending=False)
 
     # =========================
-    # 🔥 PRODUTO DA VEZ (SEM REPETIR TOP)
+    # PRODUTO DA VEZ
     # =========================
     def produto_vez(d):
 
@@ -117,9 +126,10 @@ if file:
 
         meses = sorted(x["Mes"].unique())
         if len(meses) < 2:
-            return pd.DataFrame()
+            return x.sort_values("Valor", ascending=False)
 
-        atual, anterior = meses[-1], meses[-2]
+        atual = meses[-1]
+        anterior = meses[-2]
 
         a = x[x["Mes"] == atual]
         b = x[x["Mes"] == anterior]
@@ -150,7 +160,7 @@ if file:
         return m.groupby("Marca").head(1)
 
     # =========================
-    # 💵 OPORTUNIDADE
+    # OPORTUNIDADE
     # =========================
     def oportunidade(d):
 
@@ -164,7 +174,7 @@ if file:
         return x.sort_values("Score", ascending=False)
 
     # =========================
-    # RENDER (SEM RANKING VISÍVEL)
+    # RENDER
     # =========================
     def render(uf):
 
@@ -200,12 +210,7 @@ if file:
 
         final = final.fillna("—")
 
-        # ✔ SEM RANKING VISÍVEL
-        st.dataframe(
-            final,
-            use_container_width=True,
-            hide_index=True
-        )
+        st.dataframe(final, use_container_width=True, hide_index=True)
 
         return final
 
@@ -217,7 +222,7 @@ if file:
     pr = render("PR")
 
     # =========================
-    # DOWNLOAD EXCEL
+    # DOWNLOAD
     # =========================
     excel = gerar_excel(rs, sc, pr)
 
