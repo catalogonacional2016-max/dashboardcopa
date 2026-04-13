@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+from io import BytesIO
 
 st.set_page_config(layout="wide")
 
@@ -11,19 +12,13 @@ st.title("Análise de Produtos Copa Nacional")
 st.markdown("""
 ### 📌 Como as categorias são calculadas
 
-💰 **Top Faturamento**  
-Produto com bom desempenho nos últimos 3 meses E que continua vendendo no mês atual.
-
-🔥 **Produto da Vez**  
-Produto com maior crescimento entre mês atual vs mês anterior.  
-Se for igual ao Top Faturamento, traz o 2º colocado.
-
-💵 **Oportunidade**  
-Produtos com muitos pedidos, mas baixo volume vendido (eficiência de vendas).
+💰 Top Faturamento → produto forte nos últimos 3 meses E ativo no mês atual  
+🔥 Produto da Vez → maior crescimento mês atual vs anterior (se repetir Top, pega 2º)  
+💵 Oportunidade → muitos pedidos com baixa eficiência de volume
 """)
 
 # =========================
-# CONFIGURAÇÕES
+# CONFIG
 # =========================
 MARCAS = [
 "3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
@@ -33,20 +28,30 @@ MARCAS = [
 
 ESTADOS = ["RS","SC","PR"]
 
-# =========================
-# UPLOAD
-# =========================
 file = st.file_uploader("📂 Envie sua base Excel")
 
+# =========================
+# FUNÇÃO EXCEL
+# =========================
+def gerar_excel(rs, sc, pr):
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        rs.to_excel(writer, index=False, sheet_name="RS")
+        sc.to_excel(writer, index=False, sheet_name="SC")
+        pr.to_excel(writer, index=False, sheet_name="PR")
+
+    return output.getvalue()
+
+# =========================
+# APP
+# =========================
 if file:
 
     df = pd.read_excel(file)
 
-    # =========================
-    # LIMPEZA
-    # =========================
+    # limpeza robusta
     df.columns = df.columns.str.strip()
-
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
     df["UF"] = df["UF"].astype(str).str.strip().str.upper()
     df["Marca"] = df["Marca"].str.replace(r"\s+", " ", regex=True)
@@ -61,14 +66,13 @@ if file:
         return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # 💰 TOP FATURAMENTO (CORRETO)
+    # 💰 TOP FATURAMENTO
     # =========================
     def top_faturamento(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
         meses = sorted(x["Mes"].unique())
-
         if len(meses) < 4:
             return pd.DataFrame()
 
@@ -120,7 +124,8 @@ if file:
 
         m = m.sort_values(["Valor_atual","crescimento"], ascending=False)
 
-        m = m.groupby(["UF","Marca"]).head(2)
+        # regra: evita repetir TOP (pega 2º se necessário)
+        m = m.groupby(["Marca"]).head(2)
 
         return m
 
@@ -139,41 +144,35 @@ if file:
         return x.sort_values("Score", ascending=False)
 
     # =========================
-    # RENDER
+    # RENDER (SEM SCROLL VISUAL RUIM)
     # =========================
     def render(uf):
 
-        st.header(f"🇧🇷 {uf}")
+        st.markdown(f"## {uf}")
 
         d = df[df["UF"] == uf]
 
-        marcas_df = pd.DataFrame({
-            "Nº": range(1, len(MARCAS)+1),
-            "Marca": MARCAS
-        })
+        marcas_df = pd.DataFrame({"Marca": MARCAS})
 
-        # TOP FATURAMENTO
         top = top_faturamento(d)
         if not top.empty:
-            top = top.groupby(["Marca"]).head(1)
+            top = top.groupby("Marca").head(1)
             top["VAL"] = top.apply(label, axis=1)
 
-        # PRODUTO DA VEZ
         hot = produto_vez(d)
         if not hot.empty:
             hot["VAL"] = hot.apply(label, axis=1)
-            hot = hot.groupby(["Marca"]).head(1)
+            hot = hot.groupby("Marca").head(1)
 
-        # OPORTUNIDADE
         opp = oportunidade(d)
-        opp = opp.groupby(["Marca"]).head(1)
+        opp = opp.groupby("Marca").head(1)
         opp["VAL"] = opp.apply(label, axis=1)
 
         final = marcas_df.merge(top[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"💰 Top Faturamento"})
         final = final.merge(hot[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"🔥 Produto da Vez"})
         final = final.merge(opp[["Marca","VAL"]], on="Marca", how="left").rename(columns={"VAL":"💵 Oportunidade"})
 
-        st.dataframe(final, use_container_width=True)
+        st.table(final)  # <- sem scroll feio
 
         return final
 
@@ -185,17 +184,13 @@ if file:
     pr = render("PR")
 
     # =========================
-    # DOWNLOAD
+    # DOWNLOAD EXCEL PROFISSIONAL
     # =========================
-    full = pd.concat([
-        rs.assign(UF="RS"),
-        sc.assign(UF="SC"),
-        pr.assign(UF="PR")
-    ])
+    excel = gerar_excel(rs, sc, pr)
 
     st.download_button(
-        "📥 Baixar relatório completo",
-        full.to_csv(index=False).encode("utf-8"),
-        "relatorio_copa_nacional.csv",
-        "text/csv"
+        "📥 Baixar relatório completo (Excel)",
+        excel,
+        "relatorio_copa_nacional.xlsx",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
