@@ -261,9 +261,10 @@ if file:
 
     excel = gerar_excel(rs, sc, pr)
 
-    # Aqui está o fechamento do parêntese
+    # Aqui está o fechamento do parêntese corretamente:
     st.download_button(
         "📥 Baixar relatório completo",
         excel,
         "relatorio.xlsx",
-        "application/vnd.openxmlformats
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
