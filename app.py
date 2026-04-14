@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 st.title("Análise de Produtos Copa Nacional")
 
 # =========================
-# SEU TEXTO ORIGINAL RESTAURADO
+# TEXTO ÚNICO (ORIGINAL)
 # =========================
 st.markdown("""
 ### 📌 Categorias
@@ -29,12 +29,10 @@ MARCAS = [
 ESTADOS = ["RS", "SC", "PR"]
 
 file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
-
-# SUA OBSERVAÇÃO RESTAURADA
 st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 
 # =========================
-# FUNÇÕES DE CÁLCULO (MANTIDAS)
+# FUNÇÕES DE CÁLCULO (SUAS REGRAS)
 # =========================
 def pick_best(df, group="Marca", score_col=None):
     if df.empty: return df
@@ -69,8 +67,8 @@ def produto_vez(d, top_fat):
     merged["score"] = merged[["Valor_atual", "Valor_ant"]].max(axis=1)
     
     if not top_fat.empty:
-        codigos_proibidos = top_fat["Cod"].unique()
-        merged = merged[~merged["Cod"].isin(codigos_proibidos)]
+        cod_proibidos = top_fat["Cod"].unique()
+        merged = merged[~merged["Cod"].isin(cod_proibidos)]
     
     return pick_best(merged, "Marca", "score")
 
@@ -80,80 +78,97 @@ def oportunidade(d):
     return pick_best(x, "Marca", "score")
 
 # =========================
-# RENDER (COM AS MELHORIAS PEDIDAS)
+# RENDER (ESTRUTURA DUPLA: TELA VS EXCEL)
 # =========================
 def render(uf, df_global):
     st.markdown(f"## {uf}")
     d_uf = df_global[df_global["UF"] == uf].copy()
     
-    # 1. AVISO DE MARCAS AUSENTES (CONFORME PEDIDO)
-    marcas_na_base = d_uf["Marca"].unique()
+    # 1. AVISO DE MARCAS AUSENTES
+    marcas_presentes = d_uf["Marca"].unique()
     for m in MARCAS:
-        if m not in marcas_na_base:
+        if m not in marcas_presentes:
             st.warning(f"⚠️ Não há dados para a marca **{m}** no estado {uf}.")
 
-    # Cálculos
     top = top_faturamento(d_uf)
     hot = produto_vez(d_uf, top)
     opp = oportunidade(d_uf)
 
-    # 2. MONTAGEM PARA O EXCEL (COLUNAS SEPARADAS)
-    resultado = []
+    # MONTAGEM DOS DADOS
+    lista_excel = []
+    lista_dash = []
+
     for marca in MARCAS:
-        row = {"Marca": marca}
-        for nome, df_rank in [("Top", top), ("Vez", hot), ("Opp", opp)]:
-            match = df_rank[df_rank["Marca"] == marca]
-            if not match.empty:
-                row[f"{nome}_Cod"] = match.iloc[0]["Cod"]
-                row[f"{nome}_Prod"] = match.iloc[0]["Produto"]
-            else:
-                row[f"{nome}_Cod"] = "—"
-                row[f"{nome}_Prod"] = "—"
-        resultado.append(row)
+        # Busca resultados para cada categoria
+        m_top = top[top["Marca"] == marca]
+        m_hot = hot[hot["Marca"] == marca]
+        m_opp = opp[opp["Marca"] == marca]
 
-    final_df = pd.DataFrame(resultado)
+        # --- DADOS PARA O EXCEL (COLUNAS SEPARADAS) ---
+        lista_excel.append({
+            "Marca": marca,
+            "Top_Cod": m_top.iloc[0]["Cod"] if not m_top.empty else "—",
+            "Top_Prod": m_top.iloc[0]["Produto"] if not m_top.empty else "—",
+            "Vez_Cod": m_hot.iloc[0]["Cod"] if not m_hot.empty else "—",
+            "Vez_Prod": m_hot.iloc[0]["Produto"] if not m_hot.empty else "—",
+            "Opp_Cod": m_opp.iloc[0]["Cod"] if not m_opp.empty else "—",
+            "Opp_Prod": m_opp.iloc[0]["Produto"] if not m_opp.empty else "—"
+        })
 
-    # 3. FÓRMULA DE IMAGEM
-    for i, row in final_df.iterrows():
+        # --- DADOS PARA O DASH (FORMATO ORIGINAL) ---
+        lista_dash.append({
+            "Marca": marca,
+            "💰 Top Faturamento": f"{m_top.iloc[0]['Cod']} - {m_top.iloc[0]['Produto']}" if not m_top.empty else "—",
+            "🔥 Produto da Vez": f"{m_hot.iloc[0]['Cod']} - {m_hot.iloc[0]['Produto']}" if not m_hot.empty else "—",
+            "💵 Oportunidade": f"{m_opp.iloc[0]['Cod']} - {m_opp.iloc[0]['Produto']}" if not m_opp.empty else "—"
+        })
+
+    # Criar DataFrames
+    df_dash = pd.DataFrame(lista_dash)
+    df_excel = pd.DataFrame(lista_excel)
+
+    # 2. ADICIONAR FÓRMULAS DE IMAGEM (APENAS NO DF DO EXCEL)
+    for i, row in df_excel.iterrows():
         idx = i + 2
-        final_df.loc[i, "📸 Foto Top"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{idx} & ".jpg")' if row["Top_Cod"] != "—" else "—"
-        final_df.loc[i, "📸 Foto Vez"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{idx} & ".jpg")' if row["Vez_Cod"] != "—" else "—"
-        final_df.loc[i, "📸 Foto Opp"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{idx} & ".jpg")' if row["Opp_Cod"] != "—" else "—"
+        df_excel.loc[i, "📸 Foto Top"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{idx} & ".jpg")' if row["Top_Cod"] != "—" else "—"
+        df_excel.loc[i, "📸 Foto Vez"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{idx} & ".jpg")' if row["Vez_Cod"] != "—" else "—"
+        df_excel.loc[i, "📸 Foto Opp"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{idx} & ".jpg")' if row["Opp_Cod"] != "—" else "—"
 
-    # Reordenar colunas para o Excel e Streamlit
-    ordem = ["Marca", "Top_Cod", "Top_Prod", "📸 Foto Top", "Vez_Cod", "Vez_Prod", "📸 Foto Vez", "Opp_Cod", "Opp_Prod", "📸 Foto Opp"]
-    final_df = final_df[ordem]
+    # Reordenar colunas do Excel
+    ordem_excel = ["Marca", "Top_Cod", "Top_Prod", "📸 Foto Top", "Vez_Cod", "Vez_Prod", "📸 Foto Vez", "Opp_Cod", "Opp_Prod", "📸 Foto Opp"]
+    df_excel = df_excel[ordem_excel]
 
-    st.dataframe(final_df, use_container_width=True, hide_index=True)
-    return final_df
+    # Exibir no Dashboard como você queria (Limpo e com emojis)
+    st.dataframe(df_dash, use_container_width=True, hide_index=True)
+    
+    return df_excel
 
 # =========================
 # EXECUÇÃO
 # =========================
 if file:
-    df_input = pd.read_excel(file)
-    df_input.columns = df_input.columns.str.strip()
+    df_in = pd.read_excel(file)
+    df_in.columns = df_in.columns.str.strip()
     for c in ["Marca", "UF", "Produto"]:
-        if c in df_input.columns:
-            df_input[c] = df_input[c].astype(str).str.strip().str.upper()
+        if c in df_in.columns: df_in[c] = df_in[c].astype(str).str.strip().str.upper()
 
-    df_input = df_input[df_input["UF"].isin(ESTADOS)]
+    df_in = df_in[df_in["UF"].isin(ESTADOS)]
 
-    # Processa os estados
-    relatorios = {}
-    relatorios["RS"] = render("RS", df_input)
-    relatorios["SC"] = render("SC", df_input)
-    relatorios["PR"] = render("PR", df_input)
+    # Processa e gera os arquivos para download
+    relatorios_excel = {}
+    relatorios_excel["RS"] = render("RS", df_in)
+    relatorios_excel["SC"] = render("SC", df_in)
+    relatorios_excel["PR"] = render("PR", df_in)
 
-    # Gerar Excel
+    # Gerar arquivo Excel único
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        for uf, data in relatorios.items():
+        for uf, data in relatorios_excel.items():
             data.to_excel(writer, index=False, sheet_name=uf)
     
     st.download_button(
         "📥 Baixar relatório completo",
         output.getvalue(),
-        "relatorio_analise.xlsx",
+        "relatorio_copa.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
