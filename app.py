@@ -29,8 +29,7 @@ MARCAS = [
 ESTADOS = ["RS", "SC", "PR"]
 
 file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
-st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **Marca**, **UF**, **Produto**, **Valor**, **Pedidos**, e **Quantidade**.")
-
+st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 # =========================
 # EXPORT EXCEL
 # =========================
