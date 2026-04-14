@@ -78,7 +78,7 @@ def top_faturamento(d):
 # =========================
 # PRODUTO DA VEZ (CRESCIMENTO)
 # =========================
-def produto_vez(d):
+def produto_vez(d, top_produto=None):
     # Agrupa por mês, UF, marca, código e produto
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     
@@ -101,8 +101,15 @@ def produto_vez(d):
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
 
     # Agora, apenas pegamos o produto com maior valor em ambos os meses
-    return pick_best(merged, "Marca", "Valor_atual")  # Seleciona o produto com maior faturamento no mês atual
+    produtos_vez = pick_best(merged, "Marca", "Valor_atual")  # Seleciona o produto com maior faturamento no mês atual
 
+    # Verifica se o produto da vez é o mesmo que o top faturamento
+    if top_produto is not None and produtos_vez["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
+        # Se for o mesmo, pega o segundo colocado
+        produtos_vez = merged.sort_values(by="Valor_atual", ascending=False).iloc[1:2]
+        
+    return produtos_vez
+  
 # =========================
 # OPORTUNIDADE (Ajustado)
 # =========================
@@ -119,17 +126,11 @@ def oportunidade(d):
 # =========================
 # RENDER
 # =========================
+# Render
 def render(uf):
     st.markdown(f"## {uf}")
     d = df[df["UF"] == uf]
     marcas = pd.DataFrame({"Marca": MARCAS})
-
-    # Verificar se as marcas estão presentes na base
-    marcas_presentes = d["Marca"].unique()
-
-    for marca in MARCAS:
-        if marca not in marcas_presentes:
-            st.warning(f"🔔 Não há dados para a marca **{marca}** no estado {uf}.")
 
     # Calcular Top Faturamento
     top = top_faturamento(d)
@@ -137,7 +138,7 @@ def render(uf):
     top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
     # Calcular Produto da Vez
-    hot = produto_vez(d)
+    hot = produto_vez(d, top_produto=top)
     hot = hot.groupby("Marca").head(1)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
@@ -162,7 +163,6 @@ def render(uf):
     st.dataframe(final, use_container_width=True, hide_index=True)
 
     return final
-
 
 # =========================
 # EXECUÇÃO
