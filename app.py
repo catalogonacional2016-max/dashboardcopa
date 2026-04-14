@@ -159,27 +159,42 @@ if file:
         st.download_button("📥 Baixar Relatório Excel", output_excel.getvalue(), "relatorio_copa.xlsx")
 
     # 2. ZIP DE IMAGENS (A NOVIDADE)
-    with col2:
-        if st.button("🖼️ Gerar Pacote de Fotos (ZIP)"):
-            with st.spinner("Baixando imagens..."):
-                # Coleta todos os códigos únicos que apareceram no relatório
-                codigos = set()
-                for df_uf in relatorios.values():
-                    for col in ["Top_Cod", "Vez_Cod", "Opp_Cod"]:
-                        codigos.update(df_uf[col].unique())
+# ZIP de Fotos (VERSÃO OTIMIZADA COM CONTADOR)
+        if col2.button("🖼️ Gerar ZIP de Fotos"):
+            with st.spinner("Preparando..."):
+                z_buf = BytesIO()
+                # Coletar apenas códigos únicos e válidos
+                todos_cods = set()
+                for d in relatorios.values():
+                    for col_name in ["Top_Cod", "Vez_Cod", "Opp_Cod"]:
+                        cods_lista = d[col_name].tolist()
+                        todos_cods.update([str(c) for c in cods_lista if str(c) != "—"])
                 
-                codigos.discard("—") # Remove o marcador de vazio
-
-                zip_buffer = BytesIO()
-                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
-                    for cod in codigos:
-                        url = f"https://sambaled.com.br/app_imagem/{cod}.jpg"
-                        try:
-                            res = requests.get(url, timeout=5)
-                            if res.status_code == 200:
-                                zf.writestr(f"{cod}.jpg", res.content)
-                        except:
-                            continue
+                total = len(todos_cods)
+                if total == 0:
+                    st.warning("Nenhum produto encontrado para baixar fotos.")
+                else:
+                    progresso = st.empty() # Espaço para o contador
+                    baixados = 0
+                    
+                    with zipfile.ZipFile(z_buf, "w") as zf:
+                        for i, c in enumerate(todos_cods):
+                            progresso.info(f"📥 Baixando imagem {i+1} de {total} (Cód: {c})")
+                            try:
+                                # Tenta baixar a imagem
+                                r_img = requests.get(f"https://sambaled.com.br/app_imagem/{c}.jpg", timeout=2)
+                                if r_img.status_code == 200:
+                                    zf.writestr(f"{c}.jpg", r_img.content)
+                                    baixados += 1
+                            except:
+                                continue
+                    
+                    progresso.empty() # Limpa o contador ao terminar
+                    if baixados > 0:
+                        st.success(f"✅ {baixados} fotos processadas com sucesso!")
+                        st.download_button("💾 Baixar arquivo ZIP", z_buf.getvalue(), "fotos_copa.zip")
+                    else:
+                        st.error("❌ Não foi possível baixar nenhuma imagem. Verifique o link do servidor.")
                 
                 st.download_button(
                     label="💾 Clique para baixar o ZIP",
