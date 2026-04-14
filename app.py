@@ -28,8 +28,8 @@ MARCAS = [
 
 ESTADOS = ["RS", "SC", "PR"]
 
-file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
-st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
+file = st.file_uploader("📂 Envie sua base Excel")
+
 # =========================
 # EXPORT EXCEL
 # =========================
@@ -76,7 +76,7 @@ def top_faturamento(d):
     return pick_best(merged, "Marca", "score")
 
 # =========================
-# PRODUTO DA VEZ (CRESCIMENTO)
+# PRODUTO DA VEZ (FATURAMENTO)
 # =========================
 def produto_vez(d, top_produto=None):
     # Agrupa por mês, UF, marca, código e produto
@@ -100,21 +100,18 @@ def produto_vez(d, top_produto=None):
     # Preenche valores faltantes com 0 para o mês anterior (caso algum valor não tenha sido registrado)
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
 
-    # Ordena os produtos pelo faturamento do mês atual
-    produtos_vez = merged.sort_values(by="Valor_atual", ascending=False)
+    # Ordena os produtos pelo faturamento do mês atual (decrescente)
+    merged = merged.sort_values(by="Valor_atual", ascending=False)
 
-    # Verifica se o Produto da Vez é o mesmo que o Top Faturamento
-    if top_produto is not None and produtos_vez["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
-        # Se for o mesmo, pega o segundo colocado (linha 1)
-        produtos_vez = produtos_vez.iloc[1:2]
+    # Verificar se o Produto da Vez é igual ao Top Faturamento
+    if top_produto is not None:
+        # Se o produto do Produto da Vez for o mesmo do Top Faturamento, pega o segundo colocado
+        if merged["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
+            merged = merged.iloc[1:2]  # Pega o segundo colocado
 
-    # Se o Produto da Vez ainda for igual ao Top Faturamento após essa modificação,
-    # pegamos o próximo produto disponível (garantindo que nunca sejam iguais).
-    if produtos_vez["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
-        produtos_vez = produtos_vez.iloc[1:2]
+    # Retorna o resultado do Produto da Vez
+    return merged
 
-    return produtos_vez
-  
 # =========================
 # OPORTUNIDADE (Ajustado)
 # =========================
@@ -131,8 +128,6 @@ def oportunidade(d):
 # =========================
 # RENDER
 # =========================
-# Render
-# Render
 def render(uf):
     st.markdown(f"## {uf}")
     d = df[df["UF"] == uf]
@@ -143,7 +138,7 @@ def render(uf):
     top = top.groupby("Marca").head(1)
     top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Calcular Produto da Vez (passando o top_produto como parâmetro)
+    # Calcular Produto da Vez (passando o produto do Top Faturamento para garantir que não sejam iguais)
     hot = produto_vez(d, top_produto=top)
     hot = hot.groupby("Marca").head(1)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
@@ -169,6 +164,7 @@ def render(uf):
     st.dataframe(final, use_container_width=True, hide_index=True)
 
     return final
+
 
 # =========================
 # EXECUÇÃO
