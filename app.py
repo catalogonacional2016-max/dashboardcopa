@@ -32,7 +32,7 @@ file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
 st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 
 # =========================
-# FUNÇÕES DE CÁLCULO (SUAS REGRAS)
+# FUNÇÕES DE CÁLCULO
 # =========================
 def pick_best(df, group="Marca", score_col=None):
     if df.empty: return df
@@ -65,11 +65,9 @@ def produto_vez(d, top_fat):
     merged = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_atual", "_ant"))
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
     merged["score"] = merged[["Valor_atual", "Valor_ant"]].max(axis=1)
-    
     if not top_fat.empty:
         cod_proibidos = top_fat["Cod"].unique()
         merged = merged[~merged["Cod"].isin(cod_proibidos)]
-    
     return pick_best(merged, "Marca", "score")
 
 def oportunidade(d):
@@ -78,13 +76,12 @@ def oportunidade(d):
     return pick_best(x, "Marca", "score")
 
 # =========================
-# RENDER (ESTRUTURA DUPLA: TELA VS EXCEL)
+# RENDER
 # =========================
 def render(uf, df_global):
     st.markdown(f"## {uf}")
     d_uf = df_global[df_global["UF"] == uf].copy()
     
-    # 1. AVISO DE MARCAS AUSENTES
     marcas_presentes = d_uf["Marca"].unique()
     for m in MARCAS:
         if m not in marcas_presentes:
@@ -94,17 +91,14 @@ def render(uf, df_global):
     hot = produto_vez(d_uf, top)
     opp = oportunidade(d_uf)
 
-    # MONTAGEM DOS DADOS
     lista_excel = []
     lista_dash = []
 
     for marca in MARCAS:
-        # Busca resultados para cada categoria
         m_top = top[top["Marca"] == marca]
         m_hot = hot[hot["Marca"] == marca]
         m_opp = opp[opp["Marca"] == marca]
 
-        # --- DADOS PARA O EXCEL (COLUNAS SEPARADAS) ---
         lista_excel.append({
             "Marca": marca,
             "Top_Cod": m_top.iloc[0]["Cod"] if not m_top.empty else "—",
@@ -115,7 +109,6 @@ def render(uf, df_global):
             "Opp_Prod": m_opp.iloc[0]["Produto"] if not m_opp.empty else "—"
         })
 
-        # --- DADOS PARA O DASH (FORMATO ORIGINAL) ---
         lista_dash.append({
             "Marca": marca,
             "💰 Top Faturamento": f"{m_top.iloc[0]['Cod']} - {m_top.iloc[0]['Produto']}" if not m_top.empty else "—",
@@ -123,28 +116,19 @@ def render(uf, df_global):
             "💵 Oportunidade": f"{m_opp.iloc[0]['Cod']} - {m_opp.iloc[0]['Produto']}" if not m_opp.empty else "—"
         })
 
-    # Criar DataFrames
     df_dash = pd.DataFrame(lista_dash)
     df_excel = pd.DataFrame(lista_excel)
 
-    # 2. ADICIONAR FÓRMULAS DE IMAGEM (APENAS NO DF DO EXCEL)
-    for i, row in df_excel.iterrows():
-        idx = i + 2
-        df_excel.loc[i, "📸 Foto Top"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{idx} & ".jpg")' if row["Top_Cod"] != "—" else "—"
-        df_excel.loc[i, "📸 Foto Vez"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{idx} & ".jpg")' if row["Vez_Cod"] != "—" else "—"
-        df_excel.loc[i, "📸 Foto Opp"] = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{idx} & ".jpg")' if row["Opp_Cod"] != "—" else "—"
+    # Inserir colunas de foto vazias (serão preenchidas via xlsxwriter no final)
+    df_excel.insert(3, "📸 Foto Top", "")
+    df_excel.insert(7, "📸 Foto Vez", "")
+    df_excel.insert(11, "📸 Foto Opp", "")
 
-    # Reordenar colunas do Excel
-    ordem_excel = ["Marca", "Top_Cod", "Top_Prod", "📸 Foto Top", "Vez_Cod", "Vez_Prod", "📸 Foto Vez", "Opp_Cod", "Opp_Prod", "📸 Foto Opp"]
-    df_excel = df_excel[ordem_excel]
-
-    # Exibir no Dashboard como você queria (Limpo e com emojis)
     st.dataframe(df_dash, use_container_width=True, hide_index=True)
-    
     return df_excel
 
 # =========================
-# EXECUÇÃO
+# EXECUÇÃO E GRAVAÇÃO ESPECIAL
 # =========================
 if file:
     df_in = pd.read_excel(file)
@@ -154,17 +138,41 @@ if file:
 
     df_in = df_in[df_in["UF"].isin(ESTADOS)]
 
-    # Processa e gera os arquivos para download
     relatorios_excel = {}
     relatorios_excel["RS"] = render("RS", df_in)
     relatorios_excel["SC"] = render("SC", df_in)
     relatorios_excel["PR"] = render("PR", df_in)
 
-    # Gerar arquivo Excel único
     output = BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+    # Mudança aqui: usamos o engine xlsxwriter para controlar as fórmulas
+    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for uf, data in relatorios_excel.items():
             data.to_excel(writer, index=False, sheet_name=uf)
+            workbook = writer.book
+            worksheet = writer.sheets[uf]
+            
+            # Varremos as linhas para escrever a fórmula nativa sem o @
+            for i in range(len(data)):
+                row_idx = i + 1 # +1 para pular o cabeçalho no xlsxwriter
+                
+                # Fórmulas (Colunas D=3, H=7, L=11 no índice 0 do Excel)
+                # Foto Top (Coluna D usa o Cod da coluna B)
+                cod_top = data.iloc[i]["Top_Cod"]
+                if cod_top != "—":
+                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{row_idx+1} & ".jpg")'
+                    worksheet.write_formula(row_idx, 3, formula)
+                
+                # Foto Vez (Coluna H usa o Cod da coluna F)
+                cod_vez = data.iloc[i]["Vez_Cod"]
+                if cod_vez != "—":
+                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{row_idx+1} & ".jpg")'
+                    worksheet.write_formula(row_idx, 7, formula)
+                
+                # Foto Opp (Coluna L usa o Cod da coluna J)
+                cod_opp = data.iloc[i]["Opp_Cod"]
+                if cod_opp != "—":
+                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{row_idx+1} & ".jpg")'
+                    worksheet.write_formula(row_idx, 11, formula)
     
     st.download_button(
         "📥 Baixar relatório completo",
