@@ -12,9 +12,9 @@ st.title("Análise de Produtos Copa Nacional")
 st.markdown("""
 ### 📌 Categorias
 
-💰 Top Faturamento → forte nos últimos 3 meses + forte no mês atual  
-🔥 Produto da Vez → forte no último mês + cresceu em relação ao mês anterior  
-💵 Oportunidade → muitos pedidos + baixa quantidade  
+💰 Top Faturamento → maior valor faturado nos últimos 3 meses + maior valor faturado no mês atual  
+🔥 Produto da Vez → maior valor faturado no mês anterior + maior valor faturado no mês atual  
+💵 Oportunidade → maior nº de pedidos nos últimos 3 meses + baixa quantidade
 """)
 
 # =========================
