@@ -6,9 +6,6 @@ st.set_page_config(layout="wide")
 
 st.title("Análise de Produtos Copa Nacional")
 
-# =========================
-# TEXTO ÚNICO
-# =========================
 st.markdown("""
 ### 📌 Categorias
 
@@ -30,7 +27,6 @@ ESTADOS = ["RS","SC","PR"]
 
 file = st.file_uploader("📂 Envie sua base Excel")
 
-
 # =========================
 # EXPORT EXCEL
 # =========================
@@ -42,9 +38,8 @@ def gerar_excel(rs, sc, pr):
         pr.to_excel(writer, index=False, sheet_name="PR")
     return output.getvalue()
 
-
 # =========================
-# FUNÇÃO: FALLBACK POR RANKING (NÃO MUDA REGRA, SÓ ESCOLHE PRÓXIMO)
+# PICK BEST
 # =========================
 def pick_best(df, group="Marca", score_col=None):
 
@@ -73,9 +68,20 @@ if file:
     df = pd.read_excel(file)
     df.columns = df.columns.str.strip()
 
+    required_cols = ["UF","Marca","Cod","Produto","Mes","Valor","Qtd","Pedidos"]
+    missing = [c for c in required_cols if c not in df.columns]
+
+    if missing:
+        st.error(f"Colunas faltando: {missing}")
+        st.stop()
+
+    # LIMPEZA
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
     df["UF"] = df["UF"].astype(str).str.strip().str.upper()
     df["Produto"] = df["Produto"].astype(str).str.strip()
+
+    df["Mes"] = pd.to_numeric(df["Mes"], errors="coerce")
+    df = df.dropna(subset=["Mes"])
 
     df = df[df["UF"].isin(ESTADOS)]
     df = df[df["Marca"].isin(MARCAS)]
@@ -89,27 +95,41 @@ if file:
         "Pedidos":"sum"
     })
 
+    # 🔴 BASE CONSOLIDADA (PARA MÉTRICAS)
+    base_resumo = df.groupby(
+        ["UF","Marca","Cod","Produto"],
+        as_index=False
+    ).agg({
+        "Valor":"sum",
+        "Qtd":"sum",
+        "Pedidos":"sum"
+    })
+
     def label(r):
         return f"{r['Cod']} - {r['Produto']}"
 
     # =========================
-    # TOP FATURAMENTO (REGRA ORIGINAL + SCORE)
+    # TOP FATURAMENTO
     # =========================
     def top_faturamento(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        if x.empty:
+            return x
+
         meses = sorted(x["Mes"].unique())
 
         if len(meses) < 2:
-            base = x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-            return base
+            ultimos = meses[-3:]
+            base = x[x["Mes"].isin(ultimos)]
+            resumo = base.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            return pick_best(resumo, "Marca", "Valor")
 
         ultimos = meses[-4:]
-
         base = x[x["Mes"].isin(ultimos)]
 
         resumo = base.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-
         atual = x[x["Mes"] == meses[-1]].groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
 
         merged = resumo.merge(atual, on=["UF","Marca","Cod","Produto"], how="left", suffixes=("_hist","_atual"))
@@ -117,20 +137,29 @@ if file:
 
         merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
 
+        if merged["score"].max() <= 0:
+            ultimos = meses[-3:]
+            base = x[x["Mes"].isin(ultimos)]
+            resumo = base.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+            return pick_best(resumo, "Marca", "Valor")
+
         return pick_best(merged, "Marca", "score")
 
-
     # =========================
-    # PRODUTO DA VEZ (CRESCIMENTO)
+    # PRODUTO DA VEZ
     # =========================
     def produto_vez(d):
 
         x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
+
+        if x.empty:
+            return x
+
         meses = sorted(x["Mes"].unique())
 
         if len(meses) < 2:
-            base = x.groupby(["UF","Marca","Cod","Produto"], as_index=False)["Valor"].sum()
-            return base
+            atual = x[x["Mes"] == meses[-1]]
+            return pick_best(atual, "Marca", "Valor")
 
         atual = x[x["Mes"] == meses[-1]]
         ant = x[x["Mes"] == meses[-2]]
@@ -140,24 +169,42 @@ if file:
 
         m["crescimento"] = m["Valor_a"] - m["Valor_b"]
 
-        return pick_best(m, "Marca", "crescimento")
+        if m["crescimento"].max() <= 0:
+            return pick_best(atual, "Marca", "Valor")
 
+        return pick_best(m, "Marca", "crescimento")
 
     # =========================
     # OPORTUNIDADE
     # =========================
     def oportunidade(d):
 
-        x = d.groupby(["UF","Marca","Cod","Produto"], as_index=False).agg({
+        x = d.groupby(["Mes","UF","Marca","Cod","Produto"], as_index=False).agg({
             "Pedidos":"sum",
             "Qtd":"sum",
             "Valor":"sum"
         })
 
-        x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
+        if x.empty:
+            return x
 
-        return pick_best(x, "Marca", "score")
+        meses = sorted(x["Mes"].unique())
+        ultimo_mes = meses[-1]
 
+        base_total = x.groupby(["UF","Marca","Cod","Produto"], as_index=False).agg({
+            "Pedidos":"sum",
+            "Qtd":"sum",
+            "Valor":"sum"
+        })
+
+        base_total["score"] = base_total["Pedidos"] / (base_total["Qtd"].clip(lower=5))
+
+        ultimo = x[x["Mes"] == ultimo_mes]
+
+        if base_total["score"].isna().all() or base_total["score"].max() <= 0:
+            return pick_best(ultimo, "Marca", "Pedidos")
+
+        return pick_best(base_total, "Marca", "score")
 
     # =========================
     # RENDER
@@ -167,32 +214,48 @@ if file:
         st.markdown(f"## {uf}")
 
         d = df[df["UF"] == uf]
+        resumo = base_resumo[base_resumo["UF"] == uf]
+
         marcas = pd.DataFrame({"Marca": MARCAS})
 
+        # TOP
         top = top_faturamento(d)
         if not top.empty:
-            top = top.groupby("Marca").head(1)
             top["val"] = top.apply(label, axis=1)
+            top = top.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
+            top = top.rename(columns={"Valor": "Top Valor", "Qtd": "Top Qtd"})
+        else:
+            top = pd.DataFrame(columns=["Marca","val","Top Valor","Top Qtd"])
 
+        # HOT
         hot = produto_vez(d)
         if not hot.empty:
-            hot = hot.groupby("Marca").head(1)
             hot["val"] = hot.apply(label, axis=1)
+            hot = hot.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
+            hot = hot.rename(columns={"Valor": "Hot Valor", "Qtd": "Hot Qtd"})
+        else:
+            hot = pd.DataFrame(columns=["Marca","val","Hot Valor","Hot Qtd"])
 
+        # OPORTUNIDADE
         opp = oportunidade(d)
         if not opp.empty:
-            opp = opp.groupby("Marca").head(1)
             opp["val"] = opp.apply(label, axis=1)
+            opp = opp.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
+            opp = opp.rename(columns={"Valor": "Opp Valor", "Pedidos": "Opp Pedidos"})
+        else:
+            opp = pd.DataFrame(columns=["Marca","val","Opp Valor","Opp Pedidos"])
 
-        final = marcas.merge(top[["Marca","val"]], on="Marca", how="left")
-        final = final.merge(hot[["Marca","val"]], on="Marca", how="left")
-        final = final.merge(opp[["Marca","val"]], on="Marca", how="left")
+        final = marcas.copy()
+
+        final = final.merge(top[["Marca","val","Top Valor","Top Qtd"]], on="Marca", how="left")
+        final = final.merge(hot[["Marca","val","Hot Valor","Hot Qtd"]], on="Marca", how="left")
+        final = final.merge(opp[["Marca","val","Opp Valor","Opp Pedidos"]], on="Marca", how="left")
 
         final.columns = [
             "Marca",
-            "💰 Top Faturamento",
-            "🔥 Produto da Vez",
-            "💵 Oportunidade"
+            "💰 Top Faturamento","💰 Valor","💰 Qtd",
+            "🔥 Produto da Vez","🔥 Valor","🔥 Qtd",
+            "💵 Oportunidade","💵 Valor","💵 Pedidos"
         ]
 
         final = final.fillna("—")
@@ -200,7 +263,6 @@ if file:
         st.dataframe(final, use_container_width=True, hide_index=True)
 
         return final
-
 
     rs = render("RS")
     sc = render("SC")
