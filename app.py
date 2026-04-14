@@ -59,6 +59,12 @@ def pick_best(df, group="Marca", score_col=None):
     return pd.concat(result) if result else df
 
 # =========================
+# FUNÇÃO DE LABEL
+# =========================
+def label(r):
+    return f"{r['Cod']} - {r['Produto']}"
+
+# =========================
 # RENDER
 # =========================
 def render(uf):
@@ -66,9 +72,15 @@ def render(uf):
     st.markdown(f"## {uf}")
 
     d = df[df["UF"] == uf]
+    
+    # Verificação se há dados para o estado (uf)
+    if d.empty:
+        st.warning(f"Não há dados disponíveis para o estado {uf}!")
+        return pd.DataFrame()  # Retorna um DataFrame vazio se não houver dados
+
     marcas = pd.DataFrame({"Marca": MARCAS})
 
-    # TOP
+    # TOP FATURAMENTO
     top = top_faturamento(d)
     if top.empty:
         st.warning(f"Não há dados de 'Top Faturamento' para {uf}!")
@@ -76,7 +88,7 @@ def render(uf):
     else:
         top["val"] = top.apply(label, axis=1)
 
-    # HOT
+    # PRODUTO DA VEZ
     hot = produto_vez(d)
     if hot.empty:
         st.warning(f"Não há dados de 'Produto da Vez' para {uf}!")
@@ -122,13 +134,74 @@ def render(uf):
     return final
 
 # =========================
+# FUNÇÃO TOP FATURAMENTO
+# =========================
+def top_faturamento(d):
+    x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    meses = sorted(x["Mes"].unique())
+
+    if len(meses) < 2:
+        base = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+        return base
+
+    ultimos = meses[-4:]
+
+    base = x[x["Mes"].isin(ultimos)]
+
+    resumo = base.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+
+    atual = x[x["Mes"] == meses[-1]].groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+
+    merged = resumo.merge(atual, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_hist", "_atual"))
+    merged["Valor_atual"] = merged["Valor_atual"].fillna(0)
+
+    merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+
+    return pick_best(merged, "Marca", "score")
+
+# =========================
+# FUNÇÃO PRODUTO DA VEZ
+# =========================
+def produto_vez(d):
+    x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    meses = sorted(x["Mes"].unique())
+
+    if len(meses) < 2:
+        base = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+        return base
+
+    atual = x[x["Mes"] == meses[-1]]
+    ant = x[x["Mes"] == meses[-2]]
+
+    m = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_a", "_b"))
+    m["Valor_b"] = m["Valor_b"].fillna(0)
+
+    m["crescimento"] = m["Valor_a"] - m["Valor_b"]
+
+    return pick_best(m, "Marca", "crescimento")
+
+# =========================
+# FUNÇÃO OPORTUNIDADE
+# =========================
+def oportunidade(d):
+    x = d.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False).agg({
+        "Pedidos": "sum",
+        "Qtd": "sum",
+        "Valor": "sum"
+    })
+
+    x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
+
+    return pick_best(x, "Marca", "score")
+
+# =========================
 # EXECUÇÃO
 # =========================
 if file:
     df = pd.read_excel(file)
     df.columns = df.columns.str.strip()
 
-    required_cols = ["UF","Marca","Cod","Produto","Mes","Valor","Qtd","Pedidos"]
+    required_cols = ["UF", "Marca", "Cod", "Produto", "Mes", "Valor", "Qtd", "Pedidos"]
     missing = [c for c in required_cols if c not in df.columns]
 
     if missing:
@@ -147,22 +220,12 @@ if file:
     df = df[df["Marca"].isin(MARCAS)]
 
     df = df.groupby(
-        ["UF","Marca","Cod","Produto","Mes"],
+        ["UF", "Marca", "Cod", "Produto", "Mes"],
         as_index=False
     ).agg({
-        "Valor":"sum",
-        "Qtd":"sum",
-        "Pedidos":"sum"
-    })
-
-    # 🔴 BASE CONSOLIDADA (PARA MÉTRICAS)
-    base_resumo = df.groupby(
-        ["UF","Marca","Cod","Produto"],
-        as_index=False
-    ).agg({
-        "Valor":"sum",
-        "Qtd":"sum",
-        "Pedidos":"sum"
+        "Valor": "sum",
+        "Qtd": "sum",
+        "Pedidos": "sum"
     })
 
     # Geração das métricas para cada estado
