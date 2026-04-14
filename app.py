@@ -1,3 +1,7 @@
+import streamlit as st
+import pandas as pd
+from io import BytesIO
+
 st.set_page_config(layout="wide")
 
 st.title("Análise de Produtos Copa Nacional")
@@ -8,20 +12,9 @@ st.title("Análise de Produtos Copa Nacional")
 st.markdown("""
 ### 📌 Categorias
 
-💰 Top Faturamento → maior valor faturado nos últimos 3 meses + maior valor faturado no mês atual  
-🔥 Produto da Vez → maior valor faturado no mês anterior + maior valor faturado no mês atual  
+💰 Top Faturamento → maior valor faturado nos últimos 3 meses + maior valor faturado no mês atual
+🔥 Produto da Vez → maior valor faturado no mês anterior + maior valor faturado no mês atual
 💵 Oportunidade → maior nº de pedidos nos últimos 3 meses + baixa quantidade
-
-### 📝 Observação
-Por favor, envie seu arquivo em formato **.xlsx** com as seguintes colunas:
-- **UF**
-- **Marca**
-- **Cod**
-- **Produto**
-- **Pedidos**
-- **Mes**
-- **Valor**
-- **Qtd**
 """)
 
 # =========================
@@ -35,7 +28,8 @@ MARCAS = [
 
 ESTADOS = ["RS", "SC", "PR"]
 
-file = st.file_uploader("📂 Envie seu arquivo em formato .xlsx")
+file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
+st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 
 # =========================
 # EXPORT EXCEL
@@ -88,7 +82,7 @@ def top_faturamento(d):
 def produto_vez(d):
     # Agrupa por mês, UF, marca, código e produto
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
-
+    
     # Filtra os meses
     meses = sorted(x["Mes"].unique())
 
@@ -169,6 +163,7 @@ def render(uf):
     st.dataframe(final, use_container_width=True, hide_index=True)
 
     return final
+
 
 # =========================
 # EXECUÇÃO
