@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from io import BytesIO
+import requests
+import zipfile
 
 st.set_page_config(layout="wide")
 
@@ -32,7 +34,7 @@ file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
 st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 
 # =========================
-# FUNÇÕES DE CÁLCULO
+# FUNÇÕES DE CÁLCULO (IGUAIS)
 # =========================
 def pick_best(df, group="Marca", score_col=None):
     if df.empty: return df
@@ -76,7 +78,7 @@ def oportunidade(d):
     return pick_best(x, "Marca", "score")
 
 # =========================
-# RENDER
+# RENDER (IGUAL)
 # =========================
 def render(uf, df_global):
     st.markdown(f"## {uf}")
@@ -99,35 +101,39 @@ def render(uf, df_global):
         m_hot = hot[hot["Marca"] == marca]
         m_opp = opp[opp["Marca"] == marca]
 
-        # Criando as linhas para o Excel com as colunas de foto já vazias
+        cod_t = m_top.iloc[0]["Cod"] if not m_top.empty else "—"
+        cod_v = m_hot.iloc[0]["Cod"] if not m_hot.empty else "—"
+        cod_o = m_opp.iloc[0]["Cod"] if not m_opp.empty else "—"
+
+        idx = len(lista_excel) + 2 
+        
         lista_excel.append({
             "Marca": marca,
-            "Top_Cod": m_top.iloc[0]["Cod"] if not m_top.empty else "—",
+            "Top_Cod": cod_t,
             "Top_Prod": m_top.iloc[0]["Produto"] if not m_top.empty else "—",
-            "📸 Foto Top": "",
-            "Vez_Cod": m_hot.iloc[0]["Cod"] if not m_hot.empty else "—",
+            "📸 Foto Top": f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{idx} & ".jpg")' if cod_t != "—" else "—",
+            "Vez_Cod": cod_v,
             "Vez_Prod": m_hot.iloc[0]["Produto"] if not m_hot.empty else "—",
-            "📸 Foto Vez": "",
-            "Opp_Cod": m_opp.iloc[0]["Cod"] if not m_opp.empty else "—",
+            "📸 Foto Vez": f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{idx} & ".jpg")' if cod_v != "—" else "—",
+            "Opp_Cod": cod_o,
             "Opp_Prod": m_opp.iloc[0]["Produto"] if not m_opp.empty else "—",
-            "📸 Foto Opp": ""
+            "📸 Foto Opp": f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{idx} & ".jpg")' if cod_o != "—" else "—"
         })
 
         lista_dash.append({
             "Marca": marca,
-            "💰 Top Faturamento": f"{m_top.iloc[0]['Cod']} - {m_top.iloc[0]['Produto']}" if not m_top.empty else "—",
-            "🔥 Produto da Vez": f"{m_hot.iloc[0]['Cod']} - {m_hot.iloc[0]['Produto']}" if not m_hot.empty else "—",
-            "💵 Oportunidade": f"{m_opp.iloc[0]['Cod']} - {m_opp.iloc[0]['Produto']}" if not m_opp.empty else "—"
+            "💰 Top Faturamento": f"{cod_t} - {m_top.iloc[0]['Produto']}" if not m_top.empty else "—",
+            "🔥 Produto da Vez": f"{cod_v} - {m_hot.iloc[0]['Produto']}" if not m_hot.empty else "—",
+            "💵 Oportunidade": f"{cod_o} - {m_opp.iloc[0]['Produto']}" if not m_opp.empty else "—"
         })
 
     df_dash = pd.DataFrame(lista_dash)
     df_excel = pd.DataFrame(lista_excel)
-
     st.dataframe(df_dash, use_container_width=True, hide_index=True)
     return df_excel
 
 # =========================
-# EXECUÇÃO E GRAVAÇÃO
+# EXECUÇÃO
 # =========================
 if file:
     df_in = pd.read_excel(file)
@@ -137,37 +143,47 @@ if file:
 
     df_in = df_in[df_in["UF"].isin(ESTADOS)]
 
-    relatorios_excel = {}
-    relatorios_excel["RS"] = render("RS", df_in)
-    relatorios_excel["SC"] = render("SC", df_in)
-    relatorios_excel["PR"] = render("PR", df_in)
+    relatorios = {}
+    relatorios["RS"] = render("RS", df_in)
+    relatorios["SC"] = render("SC", df_in)
+    relatorios["PR"] = render("PR", df_in)
 
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
-        for uf, data in relatorios_excel.items():
+    # 1. EXCEL
+    output_excel = BytesIO()
+    with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
+        for uf, data in relatorios.items():
             data.to_excel(writer, index=False, sheet_name=uf)
-            workbook = writer.book
-            worksheet = writer.sheets[uf]
-            
-            # Escrevendo a fórmula IMAGEM sem o @
-            for i in range(len(data)):
-                row_idx = i + 1 
-                
-                # Foto Top (Usa Cod da coluna B, escreve na coluna D=3)
-                if data.iloc[i]["Top_Cod"] != "—":
-                    worksheet.write_formula(row_idx, 3, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{row_idx+1} & ".jpg")')
-                
-                # Foto Vez (Usa Cod da coluna E, escreve na coluna G=6)
-                if data.iloc[i]["Vez_Cod"] != "—":
-                    worksheet.write_formula(row_idx, 6, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{row_idx+1} & ".jpg")')
-                
-                # Foto Opp (Usa Cod da coluna H, escreve na coluna J=9)
-                if data.iloc[i]["Opp_Cod"] != "—":
-                    worksheet.write_formula(row_idx, 9, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{row_idx+1} & ".jpg")')
     
-    st.download_button(
-        "📥 Baixar relatório completo",
-        output.getvalue(),
-        "relatorio_copa.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button("📥 Baixar Relatório Excel", output_excel.getvalue(), "relatorio_copa.xlsx")
+
+    # 2. ZIP DE IMAGENS (A NOVIDADE)
+    with col2:
+        if st.button("🖼️ Gerar Pacote de Fotos (ZIP)"):
+            with st.spinner("Baixando imagens..."):
+                # Coleta todos os códigos únicos que apareceram no relatório
+                codigos = set()
+                for df_uf in relatorios.values():
+                    for col in ["Top_Cod", "Vez_Cod", "Opp_Cod"]:
+                        codigos.update(df_uf[col].unique())
+                
+                codigos.discard("—") # Remove o marcador de vazio
+
+                zip_buffer = BytesIO()
+                with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED) as zf:
+                    for cod in codigos:
+                        url = f"https://sambaled.com.br/app_imagem/{cod}.jpg"
+                        try:
+                            res = requests.get(url, timeout=5)
+                            if res.status_code == 200:
+                                zf.writestr(f"{cod}.jpg", res.content)
+                        except:
+                            continue
+                
+                st.download_button(
+                    label="💾 Clique para baixar o ZIP",
+                    data=zip_buffer.getvalue(),
+                    file_name="fotos_produtos.zip",
+                    mime="application/zip"
+                )
