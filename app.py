@@ -18,9 +18,9 @@ st.markdown("""
 # CONFIG
 # =========================
 MARCAS = [
-"3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
-"MISTER ABRASIVOS","MISTER ELETRICOS","MISTER FERRAMENTAS",
-"MISTER GERAL","MISTER PARAFUSOS"
+    "3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
+    "MISTER ABRASIVOS","MISTER ELETRICOS","MISTER FERRAMENTAS",
+    "MISTER GERAL","MISTER PARAFUSOS"
 ]
 
 ESTADOS = ["RS","SC","PR"]
@@ -42,7 +42,6 @@ def gerar_excel(rs, sc, pr):
 # PICK BEST
 # =========================
 def pick_best(df, group="Marca", score_col=None):
-
     if df.empty:
         return df
 
@@ -59,12 +58,10 @@ def pick_best(df, group="Marca", score_col=None):
 
     return pd.concat(result) if result else df
 
-
 # =========================
 # APP
 # =========================
 if file:
-
     df = pd.read_excel(file)
     df.columns = df.columns.str.strip()
 
@@ -222,40 +219,34 @@ if file:
         top = top_faturamento(d)
         if not top.empty:
             top["val"] = top.apply(label, axis=1)
-            top = top.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
-            top = top.rename(columns={"Valor": "Top Valor", "Qtd": "Top Qtd"})
         else:
-            top = pd.DataFrame(columns=["Marca","val","Top Valor","Top Qtd"])
+            top = pd.DataFrame(columns=["Marca","val"])
 
         # HOT
         hot = produto_vez(d)
         if not hot.empty:
             hot["val"] = hot.apply(label, axis=1)
-            hot = hot.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
-            hot = hot.rename(columns={"Valor": "Hot Valor", "Qtd": "Hot Qtd"})
         else:
-            hot = pd.DataFrame(columns=["Marca","val","Hot Valor","Hot Qtd"])
+            hot = pd.DataFrame(columns=["Marca","val"])
 
         # OPORTUNIDADE
         opp = oportunidade(d)
         if not opp.empty:
             opp["val"] = opp.apply(label, axis=1)
-            opp = opp.merge(resumo, on=["UF","Marca","Cod","Produto"], how="left")
-            opp = opp.rename(columns={"Valor": "Opp Valor", "Pedidos": "Opp Pedidos"})
         else:
-            opp = pd.DataFrame(columns=["Marca","val","Opp Valor","Opp Pedidos"])
+            opp = pd.DataFrame(columns=["Marca","val"])
 
         final = marcas.copy()
 
-        final = final.merge(top[["Marca","val","Top Valor","Top Qtd"]], on="Marca", how="left")
-        final = final.merge(hot[["Marca","val","Hot Valor","Hot Qtd"]], on="Marca", how="left")
-        final = final.merge(opp[["Marca","val","Opp Valor","Opp Pedidos"]], on="Marca", how="left")
+        final = final.merge(top[["Marca","val"]], on="Marca", how="left")
+        final = final.merge(hot[["Marca","val"]], on="Marca", how="left")
+        final = final.merge(opp[["Marca","val"]], on="Marca", how="left")
 
         final.columns = [
             "Marca",
-            "💰 Top Faturamento","💰 Valor","💰 Qtd",
-            "🔥 Produto da Vez","🔥 Valor","🔥 Qtd",
-            "💵 Oportunidade","💵 Valor","💵 Pedidos"
+            "💰 Top Faturamento",
+            "🔥 Produto da Vez",
+            "💵 Oportunidade"
         ]
 
         final = final.fillna("—")
@@ -271,8 +262,3 @@ if file:
     excel = gerar_excel(rs, sc, pr)
 
     st.download_button(
-        "📥 Baixar relatório completo",
-        excel,
-        "relatorio.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
