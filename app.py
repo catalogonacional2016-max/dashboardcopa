@@ -21,15 +21,14 @@ st.markdown("""
 # CONFIG
 # =========================
 MARCAS = [
-"3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
-"MISTER ABRASIVOS","MISTER ELETRICOS","MISTER FERRAMENTAS",
-"MISTER GERAL","MISTER PARAFUSOS"
+    "3M","HERC","KRONA","ROMA","DINAIDER SCHNEIDER","SCHNEIDER","STECK",
+    "MISTER ABRASIVOS","MISTER ELETRICOS","MISTER FERRAMENTAS",
+    "MISTER GERAL","MISTER PARAFUSOS"
 ]
 
 ESTADOS = ["RS","SC","PR"]
 
 file = st.file_uploader("📂 Envie sua base Excel")
-
 
 # =========================
 # EXPORT EXCEL
@@ -120,19 +119,28 @@ def render(uf):
 
     # Calcular Top Faturamento
     top = top_faturamento(d)
-    if not top.empty:
+    if top.empty:
+        for marca in MARCAS:
+            st.warning(f"🔔 Não há dados para **Top Faturamento** da marca: {marca}.")
+    else:
         top = top.groupby("Marca").head(1)
         top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
     # Calcular Produto da Vez
     hot = produto_vez(d)
-    if not hot.empty:
+    if hot.empty:
+        for marca in MARCAS:
+            st.warning(f"🔔 Não há dados para **Produto da Vez** da marca: {marca}.")
+    else:
         hot = hot.groupby("Marca").head(1)
         hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
     # Calcular Oportunidade
     opp = oportunidade(d)
-    if not opp.empty:
+    if opp.empty:
+        for marca in MARCAS:
+            st.warning(f"🔔 Não há dados para **Oportunidade** da marca: {marca}.")
+    else:
         opp = opp.groupby("Marca").head(1)
         opp["val"] = opp.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
