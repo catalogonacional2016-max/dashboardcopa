@@ -157,13 +157,10 @@ def render(uf):
     top = top.groupby("Marca").head(1)
     top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Calcular Produto da Vez
-    hot = produto_vez(d)
+    # Calcular Produto da Vez (passando o top_fat para garantir que sejam diferentes)
+    hot = produto_vez(d, top)
     hot = hot.groupby("Marca").head(1)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
-
-    # Garantir que o Produto da Vez não seja o mesmo que o Top Faturamento
-    hot = garantir_produto_diferente(top, hot)
 
     # Calcular Oportunidade
     opp = oportunidade(d)
@@ -186,8 +183,6 @@ def render(uf):
     st.dataframe(final, use_container_width=True, hide_index=True)
 
     return final
-
-
 # =========================
 # EXECUÇÃO
 # =========================
