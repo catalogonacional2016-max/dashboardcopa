@@ -196,9 +196,4 @@ if file:
                     else:
                         st.error("❌ Não foi possível baixar nenhuma imagem. Verifique o link do servidor.")
                 
-                st.download_button(
-                    label="💾 Clique para baixar o ZIP",
-                    data=zip_buffer.getvalue(),
-                    file_name="fotos_produtos.zip",
-                    mime="application/zip"
-                )
+            
