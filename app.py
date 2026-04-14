@@ -62,47 +62,67 @@ def pick_best(df, group="Marca", score_col=None):
 # TOP FATURAMENTO (REGRA ORIGINAL + SCORE)
 # =========================
 def top_faturamento(d):
+    # Agrupa por mês, UF, marca, código e produto
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    
+    # Ordena e pega os últimos 3 meses
     meses = sorted(x["Mes"].unique())
-    if len(meses) < 2:
-        base = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
-        return base
-    ultimos = meses[-4:]
-    base = x[x["Mes"].isin(ultimos)]
-    resumo = base.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    if len(meses) < 3:
+        return x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()  # Se não houver 3 meses completos
+
+    ultimos_3_meses = meses[-3:]
+    base_3_meses = x[x["Mes"].isin(ultimos_3_meses)]
+    
+    # Soma o faturamento nos últimos 3 meses
+    resumo = base_3_meses.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    
+    # Pega o faturamento do mês atual
     atual = x[x["Mes"] == meses[-1]].groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    
+    # Merge entre os dados dos últimos 3 meses e o mês atual
     merged = resumo.merge(atual, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_hist", "_atual"))
     merged["Valor_atual"] = merged["Valor_atual"].fillna(0)
+    
+    # Calcula o score (peso 60% nos últimos 3 meses e 40% no mês atual)
     merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
+    
+    # Retorna o melhor produto com base no score
     return pick_best(merged, "Marca", "score")
 
 # =========================
-# PRODUTO DA VEZ (CRESCIMENTO)
+# PRODUTO DA VEZ (MAIOR FATURAMENTO NO MÊS ATUAL E MÊS ANTERIOR)
 # =========================
-def produto_vez(d):
+def produto_vez(d, top_fat):
     # Agrupa por mês, UF, marca, código e produto
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     
     # Filtra os meses
     meses = sorted(x["Mes"].unique())
-
-    # Se não houver dois meses completos, simplesmente retorna os produtos com maior valor
+    
     if len(meses) < 2:
-        base = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
-        return base
+        return x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
 
-    # Se houver pelo menos dois meses completos, considera o mês atual e o anterior
+    # Pega o mês atual e anterior
     atual = x[x["Mes"] == meses[-1]]  # Último mês (atual)
     ant = x[x["Mes"] == meses[-2]]    # Mês anterior
-
+    
     # Merge entre os dados do mês atual e do mês anterior
     merged = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_atual", "_ant"))
-
-    # Preenche valores faltantes com 0 para o mês anterior (caso algum valor não tenha sido registrado)
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
+    
+    # Calcula o faturamento do mês atual e do mês anterior
+    merged["score"] = merged[["Valor_atual", "Valor_ant"]].max(axis=1)
+    
+    # Seleciona o produto com maior faturamento entre os dois meses
+    produto_vez = pick_best(merged, "Marca", "score")
 
-    # Agora, apenas pegamos o produto com maior valor em ambos os meses
-    return pick_best(merged, "Marca", "Valor_atual")  # Seleciona o produto com maior faturamento no mês atual
+    # Garante que o Produto da Vez não seja o mesmo que o Top Faturamento
+    if not produto_vez.empty and produto_vez.iloc[0]["Produto"] == top_fat.iloc[0]["Produto"]:
+        # Substitui o produto da vez por outro produto
+        merged = merged[merged["Produto"] != top_fat.iloc[0]["Produto"]]  # Exclui o produto do Top Faturamento
+        produto_vez = pick_best(merged, "Marca", "score")  # Recalcula o produto da vez
+    
+    return produto_vez
 
 # =========================
 # OPORTUNIDADE (Ajustado)
@@ -116,16 +136,6 @@ def oportunidade(d):
     x["score"] = x["Pedidos"] / (x["Qtd"] + 1)  # Adiciona 1 para evitar divisão por zero
     x = x.sort_values(by=["score", "Qtd"], ascending=[False, True])  # Ordena pelo score e pela menor quantidade
     return pick_best(x, "Marca", "score")
-
-# =========================
-# GARANTIR PRODUTO DIFERENTE (FUNÇÃO NOVA)
-# =========================
-def garantir_produto_diferente(top, hot):
-    # Se o Produto da Vez for o mesmo que o Top Faturamento, ajusta
-    if hot["Cod"].iloc[0] == top["Cod"].iloc[0] and hot["Produto"].iloc[0] == top["Produto"].iloc[0]:
-        # Ajuste: Retorna o segundo produto mais alto ou qualquer outra lógica de exclusão
-        hot = hot.tail(1)  # Aqui você pode escolher outro produto com base em sua lógica.
-    return hot
 
 # =========================
 # RENDER
