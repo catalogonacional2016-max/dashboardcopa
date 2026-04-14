@@ -29,21 +29,22 @@ MARCAS = [
 ESTADOS = ["RS", "SC", "PR"]
 
 file = st.file_uploader("📂 Envie seu arquivo em .xlsx")
+
+# --- SUA OBSERVAÇÃO RECUPERADA ---
 st.markdown("🔔 **Observação:** Certifique-se de que a base de dados esteja no formato correto, com as colunas **UF**, **Marca**, **Cod**, **Produto**, **Pedidos**, **Mes**, **Valor**, e **Qtd**.")
 
 # =========================
 # EXPORT EXCEL
 # =========================
-def gerar_excel(rs, sc, pr):
+def gerar_excel(dic_dfs):
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        rs.to_excel(writer, index=False, sheet_name="RS")
-        sc.to_excel(writer, index=False, sheet_name="SC")
-        pr.to_excel(writer, index=False, sheet_name="PR")
+        for uf, df_uf in dic_dfs.items():
+            df_uf.to_excel(writer, index=False, sheet_name=uf)
     return output.getvalue()
 
 # =========================
-# FUNÇÃO: FALLBACK POR RANKING (NÃO MUDA REGRA, SÓ ESCOLHE PRÓXIMO)
+# FUNÇÃO: RANKING
 # =========================
 def pick_best(df, group="Marca", score_col=None):
     if df.empty:
@@ -51,38 +52,14 @@ def pick_best(df, group="Marca", score_col=None):
     if score_col is None:
         score_col = df.columns[-1]
     df = df.sort_values(score_col, ascending=False)
-    result = []
-    for m in df[group].unique():
-        sub = df[df[group] == m]
-        if not sub.empty:
-            result.append(sub.head(1))
-    return pd.concat(result) if result else df
-
-# =========================
-# TOP FATURAMENTO (REGRA ORIGINAL + SCORE)
-# =========================
-# =========================
-# FUNÇÃO: ESCOLHER O MELHOR (RANKING)
-# =========================
-def pick_best(df, group="Marca", score_col=None):
-    if df.empty:
-        return df
-    if score_col is None:
-        score_col = df.columns[-1]
-    
-    # Ordena pelo score do maior para o menor
-    df = df.sort_values(score_col, ascending=False)
-    
-    # Agrupa por Marca e pega o primeiro de cada (que será o maior score disponível)
     return df.groupby(group).head(1)
 
 # =========================
-# TOP FATURAMENTO
+# TOP FATURAMENTO (SUA REGRA ORIGINAL)
 # =========================
 def top_faturamento(d):
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     meses = sorted(x["Mes"].unique())
-    
     if len(meses) < 3:
         resumo = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
         resumo["score"] = resumo["Valor"]
@@ -91,7 +68,6 @@ def top_faturamento(d):
     ultimos_3_meses = meses[-3:]
     base_3_meses = x[x["Mes"].isin(ultimos_3_meses)]
     resumo = base_3_meses.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
-    
     atual = x[x["Mes"] == meses[-1]].groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     
     merged = resumo.merge(atual, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_hist", "_atual"))
@@ -101,12 +77,11 @@ def top_faturamento(d):
     return pick_best(merged, "Marca", "score")
 
 # =========================
-# PRODUTO DA VEZ (COM FILTRO DE EXCLUSÃO)
+# PRODUTO DA VEZ (SUA REGRA + FILTRO DE REPETIÇÃO)
 # =========================
-def produto_vez(d, top_fat_df):
+def produto_vez(d, top_fat):
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     meses = sorted(x["Mes"].unique())
-    
     if len(meses) < 2:
         return pd.DataFrame()
 
@@ -117,20 +92,15 @@ def produto_vez(d, top_fat_df):
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
     merged["score"] = merged[["Valor_atual", "Valor_ant"]].max(axis=1)
 
-    # --- LÓGICA DE EXCLUSÃO ---
-    # Pegamos os códigos que já ganharam no Top Faturamento
-    codigos_proibidos = top_fat_df["Cod"].unique()
-    
-    # Filtramos para remover esses códigos antes de escolher o melhor
+    # FILTRO: Não ser igual ao Top Faturamento
+    codigos_proibidos = top_fat["Cod"].unique()
     merged_filtrado = merged[~merged["Cod"].isin(codigos_proibidos)].copy()
     
-    # Se sobrar algo após o filtro, escolhemos o melhor. Se não, usamos o original.
     df_para_escolha = merged_filtrado if not merged_filtrado.empty else merged
-    
     return pick_best(df_para_escolha, "Marca", "score")
 
 # =========================
-# OPORTUNIDADE
+# OPORTUNIDADE (SUA REGRA ORIGINAL)
 # =========================
 def oportunidade(d):
     x = d.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False).agg({
@@ -141,50 +111,58 @@ def oportunidade(d):
     return pick_best(x, "Marca", "score")
 
 # =========================
-# RENDER (O CORAÇÃO DO RELATÓRIO)
+# RENDER
 # =========================
 def render(uf):
     st.markdown(f"## {uf}")
-    
-    # Filtra os dados apenas para o estado atual
     d_uf = df[df["UF"] == uf].copy()
     
-    # 1. Calcula Top Faturamento
+    # 1. MENSAGEM DE MARCAS AUSENTES
+    marcas_na_base = d_uf["Marca"].unique()
+    for m in MARCAS:
+        if m not in marcas_na_base:
+            st.warning(f"⚠️ Não há dados para a marca **{m}** no estado {uf}.")
+
+    # Cálculos
     top = top_faturamento(d_uf)
-    # Criamos a string de exibição "Cod - Nome"
-    top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
-
-    # 2. Calcula Produto da Vez (passando os resultados do 'top' para serem excluídos)
     hot = produto_vez(d_uf, top)
-    hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
-
-    # 3. Calcula Oportunidade
     opp = oportunidade(d_uf)
-    opp["val"] = opp.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # 4. Montagem da Tabela Final por Marca
-    marcas_base = pd.DataFrame({"Marca": MARCAS})
+    # 2. COLUNAS SEPARADAS
+    resultado = []
+    for marca in MARCAS:
+        row = {"Marca": marca}
+        
+        m_top = top[top["Marca"] == marca]
+        row["Top_Cod"] = m_top.iloc[0]["Cod"] if not m_top.empty else "—"
+        row["Top_Prod"] = m_top.iloc[0]["Produto"] if not m_top.empty else "—"
+        
+        m_hot = hot[hot["Marca"] == marca]
+        row["Vez_Cod"] = m_hot.iloc[0]["Cod"] if not m_hot.empty else "—"
+        row["Vez_Prod"] = m_hot.iloc[0]["Produto"] if not m_hot.empty else "—"
+        
+        m_opp = opp[opp["Marca"] == marca]
+        row["Opp_Cod"] = m_opp.iloc[0]["Cod"] if not m_opp.empty else "—"
+        row["Opp_Prod"] = m_opp.iloc[0]["Produto"] if not m_opp.empty else "—"
+        
+        resultado.append(row)
+
+    final_df = pd.DataFrame(resultado)
+
+    # 3. FÓRMULA DE IMAGEM
+    links_top, links_vez, links_opp = [], [], []
+    for i, row in enumerate(resultado, start=2):
+        links_top.append(f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{i} & ".jpg")' if row["Top_Cod"] != "—" else "—")
+        links_vez.append(f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{i} & ".jpg")' if row["Vez_Cod"] != "—" else "—")
+        links_opp.append(f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{i} & ".jpg")' if row["Opp_Cod"] != "—" else "—")
+
+    final_df.insert(3, "📸 Foto Top", links_top)
+    final_df.insert(7, "📸 Foto Vez", links_vez)
+    final_df.insert(11, "📸 Foto Opp", links_opp)
     
-    # Fazemos os merges para unir as colunas
-    final = marcas_base.merge(top[["Marca", "val"]], on="Marca", how="left")
-    final = final.merge(hot[["Marca", "val"]], on="Marca", how="left", suffixes=("_top", "_hot"))
-    final = final.merge(opp[["Marca", "val"]], on="Marca", how="left")
+    st.dataframe(final_df, use_container_width=True, hide_index=True)
+    return final_df
 
-    # Renomeia colunas para o Streamlit
-    final.columns = [
-        "Marca",
-        "💰 Top Faturamento",
-        "🔥 Produto da Vez",
-        "💵 Oportunidade"
-    ]
-
-    # Preenche o que estiver vazio com traço
-    final = final.fillna("—")
-    
-    # Renderiza na tela
-    st.dataframe(final, use_container_width=True, hide_index=True)
-
-    return final
 # =========================
 # EXECUÇÃO
 # =========================
@@ -194,29 +172,19 @@ if file:
     df["Marca"] = df["Marca"].astype(str).str.strip().str.upper()
     df["UF"] = df["UF"].astype(str).str.strip().str.upper()
     df["Produto"] = df["Produto"].astype(str).str.strip()
-    df = df[df["UF"].isin(ESTADOS)]
-    df = df[df["Marca"].isin(MARCAS)]
+    
+    df = df[df["UF"].isin(ESTADOS) & df["Marca"].isin(MARCAS)]
 
-    df = df.groupby(
-        ["UF", "Marca", "Cod", "Produto", "Mes"],
-        as_index=False
-    ).agg({
-        "Valor": "sum",
-        "Qtd": "sum",
-        "Pedidos": "sum"
-    })
+    relatorios = {}
+    relatorios["RS"] = render("RS")
+    relatorios["SC"] = render("SC")
+    relatorios["PR"] = render("PR")
 
-    # Gerar relatório para cada estado
-    rs = render("RS")
-    sc = render("SC")
-    pr = render("PR")
-
-    # Gerar e permitir download do Excel
-    excel = gerar_excel(rs, sc, pr)
+    excel_data = gerar_excel(relatorios)
 
     st.download_button(
         "📥 Baixar relatório completo",
-        excel,
-        "relatorio.xlsx",
+        excel_data,
+        "analise_copa.xlsx",
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
