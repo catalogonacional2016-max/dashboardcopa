@@ -100,14 +100,19 @@ def produto_vez(d, top_produto=None):
     # Preenche valores faltantes com 0 para o mês anterior (caso algum valor não tenha sido registrado)
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
 
-    # Agora, apenas pegamos o produto com maior valor em ambos os meses
-    produtos_vez = pick_best(merged, "Marca", "Valor_atual")  # Seleciona o produto com maior faturamento no mês atual
+    # Ordena os produtos pelo faturamento do mês atual
+    produtos_vez = merged.sort_values(by="Valor_atual", ascending=False)
 
-    # Verifica se o produto da vez é o mesmo que o top faturamento
+    # Verifica se o Produto da Vez é o mesmo que o Top Faturamento
     if top_produto is not None and produtos_vez["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
-        # Se for o mesmo, pega o segundo colocado
-        produtos_vez = merged.sort_values(by="Valor_atual", ascending=False).iloc[1:2]
-        
+        # Se for o mesmo, pega o segundo colocado (linha 1)
+        produtos_vez = produtos_vez.iloc[1:2]
+
+    # Se o Produto da Vez ainda for igual ao Top Faturamento após essa modificação,
+    # pegamos o próximo produto disponível (garantindo que nunca sejam iguais).
+    if produtos_vez["Produto"].iloc[0] == top_produto["Produto"].iloc[0]:
+        produtos_vez = produtos_vez.iloc[1:2]
+
     return produtos_vez
   
 # =========================
@@ -127,6 +132,7 @@ def oportunidade(d):
 # RENDER
 # =========================
 # Render
+# Render
 def render(uf):
     st.markdown(f"## {uf}")
     d = df[df["UF"] == uf]
@@ -137,7 +143,7 @@ def render(uf):
     top = top.groupby("Marca").head(1)
     top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Calcular Produto da Vez
+    # Calcular Produto da Vez (passando o top_produto como parâmetro)
     hot = produto_vez(d, top_produto=top)
     hot = hot.groupby("Marca").head(1)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
