@@ -118,6 +118,16 @@ def oportunidade(d):
     return pick_best(x, "Marca", "score")
 
 # =========================
+# GARANTIR PRODUTO DIFERENTE (FUNÇÃO NOVA)
+# =========================
+def garantir_produto_diferente(top, hot):
+    # Se o Produto da Vez for o mesmo que o Top Faturamento, ajusta
+    if hot["Cod"].iloc[0] == top["Cod"].iloc[0] and hot["Produto"].iloc[0] == top["Produto"].iloc[0]:
+        # Ajuste: Retorna o segundo produto mais alto ou qualquer outra lógica de exclusão
+        hot = hot.tail(1)  # Aqui você pode escolher outro produto com base em sua lógica.
+    return hot
+
+# =========================
 # RENDER
 # =========================
 def render(uf):
@@ -141,6 +151,9 @@ def render(uf):
     hot = produto_vez(d)
     hot = hot.groupby("Marca").head(1)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
+
+    # Garantir que o Produto da Vez não seja o mesmo que o Top Faturamento
+    hot = garantir_produto_diferente(top, hot)
 
     # Calcular Oportunidade
     opp = oportunidade(d)
