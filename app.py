@@ -99,14 +99,18 @@ def render(uf, df_global):
         m_hot = hot[hot["Marca"] == marca]
         m_opp = opp[opp["Marca"] == marca]
 
+        # Criando as linhas para o Excel com as colunas de foto já vazias
         lista_excel.append({
             "Marca": marca,
             "Top_Cod": m_top.iloc[0]["Cod"] if not m_top.empty else "—",
             "Top_Prod": m_top.iloc[0]["Produto"] if not m_top.empty else "—",
+            "📸 Foto Top": "",
             "Vez_Cod": m_hot.iloc[0]["Cod"] if not m_hot.empty else "—",
             "Vez_Prod": m_hot.iloc[0]["Produto"] if not m_hot.empty else "—",
+            "📸 Foto Vez": "",
             "Opp_Cod": m_opp.iloc[0]["Cod"] if not m_opp.empty else "—",
-            "Opp_Prod": m_opp.iloc[0]["Produto"] if not m_opp.empty else "—"
+            "Opp_Prod": m_opp.iloc[0]["Produto"] if not m_opp.empty else "—",
+            "📸 Foto Opp": ""
         })
 
         lista_dash.append({
@@ -119,16 +123,11 @@ def render(uf, df_global):
     df_dash = pd.DataFrame(lista_dash)
     df_excel = pd.DataFrame(lista_excel)
 
-    # Inserir colunas de foto vazias (serão preenchidas via xlsxwriter no final)
-    df_excel.insert(3, "📸 Foto Top", "")
-    df_excel.insert(7, "📸 Foto Vez", "")
-    df_excel.insert(11, "📸 Foto Opp", "")
-
     st.dataframe(df_dash, use_container_width=True, hide_index=True)
     return df_excel
 
 # =========================
-# EXECUÇÃO E GRAVAÇÃO ESPECIAL
+# EXECUÇÃO E GRAVAÇÃO
 # =========================
 if file:
     df_in = pd.read_excel(file)
@@ -144,35 +143,27 @@ if file:
     relatorios_excel["PR"] = render("PR", df_in)
 
     output = BytesIO()
-    # Mudança aqui: usamos o engine xlsxwriter para controlar as fórmulas
     with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
         for uf, data in relatorios_excel.items():
             data.to_excel(writer, index=False, sheet_name=uf)
             workbook = writer.book
             worksheet = writer.sheets[uf]
             
-            # Varremos as linhas para escrever a fórmula nativa sem o @
+            # Escrevendo a fórmula IMAGEM sem o @
             for i in range(len(data)):
-                row_idx = i + 1 # +1 para pular o cabeçalho no xlsxwriter
+                row_idx = i + 1 
                 
-                # Fórmulas (Colunas D=3, H=7, L=11 no índice 0 do Excel)
-                # Foto Top (Coluna D usa o Cod da coluna B)
-                cod_top = data.iloc[i]["Top_Cod"]
-                if cod_top != "—":
-                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{row_idx+1} & ".jpg")'
-                    worksheet.write_formula(row_idx, 3, formula)
+                # Foto Top (Usa Cod da coluna B, escreve na coluna D=3)
+                if data.iloc[i]["Top_Cod"] != "—":
+                    worksheet.write_formula(row_idx, 3, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & B{row_idx+1} & ".jpg")')
                 
-                # Foto Vez (Coluna H usa o Cod da coluna F)
-                cod_vez = data.iloc[i]["Vez_Cod"]
-                if cod_vez != "—":
-                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{row_idx+1} & ".jpg")'
-                    worksheet.write_formula(row_idx, 7, formula)
+                # Foto Vez (Usa Cod da coluna E, escreve na coluna G=6)
+                if data.iloc[i]["Vez_Cod"] != "—":
+                    worksheet.write_formula(row_idx, 6, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & E{row_idx+1} & ".jpg")')
                 
-                # Foto Opp (Coluna L usa o Cod da coluna J)
-                cod_opp = data.iloc[i]["Opp_Cod"]
-                if cod_opp != "—":
-                    formula = f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{row_idx+1} & ".jpg")'
-                    worksheet.write_formula(row_idx, 11, formula)
+                # Foto Opp (Usa Cod da coluna H, escreve na coluna J=9)
+                if data.iloc[i]["Opp_Cod"] != "—":
+                    worksheet.write_formula(row_idx, 9, f'=IMAGEM("https://sambaled.com.br/app_imagem/" & H{row_idx+1} & ".jpg")')
     
     st.download_button(
         "📥 Baixar relatório completo",
