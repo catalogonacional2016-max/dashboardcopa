@@ -79,17 +79,29 @@ def top_faturamento(d):
 # PRODUTO DA VEZ (CRESCIMENTO)
 # =========================
 def produto_vez(d):
+    # Agrupa por mês, UF, marca, código e produto
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+    
+    # Filtra os meses
     meses = sorted(x["Mes"].unique())
+
+    # Se não houver dois meses completos, simplesmente retorna os produtos com maior valor
     if len(meses) < 2:
         base = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
         return base
-    atual = x[x["Mes"] == meses[-1]]
-    ant = x[x["Mes"] == meses[-2]]
-    m = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_a", "_b"))
-    m["Valor_b"] = m["Valor_b"].fillna(0)
-    m["crescimento"] = m["Valor_a"] - m["Valor_b"]
-    return pick_best(m, "Marca", "crescimento")
+
+    # Se houver pelo menos dois meses completos, considera o mês atual e o anterior
+    atual = x[x["Mes"] == meses[-1]]  # Último mês (atual)
+    ant = x[x["Mes"] == meses[-2]]    # Mês anterior
+
+    # Merge entre os dados do mês atual e do mês anterior
+    merged = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_atual", "_ant"))
+
+    # Preenche valores faltantes com 0 para o mês anterior (caso algum valor não tenha sido registrado)
+    merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
+
+    # Agora, apenas pegamos o produto com maior valor em ambos os meses
+    return pick_best(merged, "Marca", "Valor_atual")  # Seleciona o produto com maior faturamento no mês atual
 
 # =========================
 # OPORTUNIDADE (Ajustado)
