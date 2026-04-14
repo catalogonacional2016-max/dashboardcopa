@@ -61,117 +61,116 @@ def pick_best(df, group="Marca", score_col=None):
 # =========================
 # TOP FATURAMENTO (REGRA ORIGINAL + SCORE)
 # =========================
-def top_faturamento(d):
-    # Agrupa por mês, UF, marca, código e produto
-    x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+# =========================
+# FUNÇÃO: ESCOLHER O MELHOR (RANKING)
+# =========================
+def pick_best(df, group="Marca", score_col=None):
+    if df.empty:
+        return df
+    if score_col is None:
+        score_col = df.columns[-1]
     
-    # Ordena e pega os últimos 3 meses
+    # Ordena pelo score do maior para o menor
+    df = df.sort_values(score_col, ascending=False)
+    
+    # Agrupa por Marca e pega o primeiro de cada (que será o maior score disponível)
+    return df.groupby(group).head(1)
+
+# =========================
+# TOP FATURAMENTO
+# =========================
+def top_faturamento(d):
+    x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     meses = sorted(x["Mes"].unique())
+    
     if len(meses) < 3:
-        return x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()  # Se não houver 3 meses completos
+        resumo = x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+        resumo["score"] = resumo["Valor"]
+        return pick_best(resumo, "Marca", "score")
 
     ultimos_3_meses = meses[-3:]
     base_3_meses = x[x["Mes"].isin(ultimos_3_meses)]
-    
-    # Soma o faturamento nos últimos 3 meses
     resumo = base_3_meses.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     
-    # Pega o faturamento do mês atual
     atual = x[x["Mes"] == meses[-1]].groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
     
-    # Merge entre os dados dos últimos 3 meses e o mês atual
     merged = resumo.merge(atual, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_hist", "_atual"))
     merged["Valor_atual"] = merged["Valor_atual"].fillna(0)
-    
-    # Calcula o score (peso 60% nos últimos 3 meses e 40% no mês atual)
     merged["score"] = merged["Valor_hist"] * 0.6 + merged["Valor_atual"] * 0.4
     
-    # Retorna o melhor produto com base no score
     return pick_best(merged, "Marca", "score")
 
 # =========================
-# PRODUTO DA VEZ (MAIOR FATURAMENTO NO MÊS ATUAL E MÊS ANTERIOR)
+# PRODUTO DA VEZ (COM FILTRO DE EXCLUSÃO)
 # =========================
-def produto_vez(d, top_fat):
-    # Agrupa por mês, UF, marca, código e produto
+def produto_vez(d, top_fat_df):
     x = d.groupby(["Mes", "UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
-    
-    # Filtra os meses
     meses = sorted(x["Mes"].unique())
     
     if len(meses) < 2:
-        return x.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False)["Valor"].sum()
+        return pd.DataFrame()
 
-    # Pega o mês atual e anterior
-    atual = x[x["Mes"] == meses[-1]]  # Último mês (atual)
-    ant = x[x["Mes"] == meses[-2]]    # Mês anterior
+    atual = x[x["Mes"] == meses[-1]]
+    ant = x[x["Mes"] == meses[-2]]
     
-    # Merge entre os dados do mês atual e do mês anterior
     merged = atual.merge(ant, on=["UF", "Marca", "Cod", "Produto"], how="left", suffixes=("_atual", "_ant"))
     merged["Valor_ant"] = merged["Valor_ant"].fillna(0)
-    
-    # Calcula o faturamento do mês atual e do mês anterior
     merged["score"] = merged[["Valor_atual", "Valor_ant"]].max(axis=1)
-    
-    # Seleciona o produto com maior faturamento entre os dois meses
-    produto_vez = pick_best(merged, "Marca", "score")
 
-    # Garante que o Produto da Vez não seja o mesmo que o Top Faturamento
-    if not produto_vez.empty and produto_vez.iloc[0]["Produto"] == top_fat.iloc[0]["Produto"]:
-        # Substitui o produto da vez por outro produto
-        merged = merged[merged["Produto"] != top_fat.iloc[0]["Produto"]]  # Exclui o produto do Top Faturamento
-        produto_vez = pick_best(merged, "Marca", "score")  # Recalcula o produto da vez
+    # --- LÓGICA DE EXCLUSÃO ---
+    # Pegamos os códigos que já ganharam no Top Faturamento
+    codigos_proibidos = top_fat_df["Cod"].unique()
     
-    return produto_vez
+    # Filtramos para remover esses códigos antes de escolher o melhor
+    merged_filtrado = merged[~merged["Cod"].isin(codigos_proibidos)].copy()
+    
+    # Se sobrar algo após o filtro, escolhemos o melhor. Se não, usamos o original.
+    df_para_escolha = merged_filtrado if not merged_filtrado.empty else merged
+    
+    return pick_best(df_para_escolha, "Marca", "score")
 
 # =========================
-# OPORTUNIDADE (Ajustado)
+# OPORTUNIDADE
 # =========================
 def oportunidade(d):
     x = d.groupby(["UF", "Marca", "Cod", "Produto"], as_index=False).agg({
-        "Pedidos": "sum",  # Total de pedidos
-        "Qtd": "sum",      # Total de unidades vendidas
-        "Valor": "sum"     # Faturamento (não será utilizado diretamente)
+        "Pedidos": "sum",
+        "Qtd": "sum"
     })
-    x["score"] = x["Pedidos"] / (x["Qtd"] + 1)  # Adiciona 1 para evitar divisão por zero
-    x = x.sort_values(by=["score", "Qtd"], ascending=[False, True])  # Ordena pelo score e pela menor quantidade
+    x["score"] = x["Pedidos"] / (x["Qtd"] + 1)
     return pick_best(x, "Marca", "score")
 
 # =========================
-# RENDER
+# RENDER (O CORAÇÃO DO RELATÓRIO)
 # =========================
 def render(uf):
     st.markdown(f"## {uf}")
-    d = df[df["UF"] == uf]
-    marcas = pd.DataFrame({"Marca": MARCAS})
-
-    # Verificar se as marcas estão presentes na base
-    marcas_presentes = d["Marca"].unique()
-
-    for marca in MARCAS:
-        if marca not in marcas_presentes:
-            st.warning(f"🔔 Não há dados para a marca **{marca}** no estado {uf}.")
-
-    # Calcular Top Faturamento
-    top = top_faturamento(d)
-    top = top.groupby("Marca").head(1)
+    
+    # Filtra os dados apenas para o estado atual
+    d_uf = df[df["UF"] == uf].copy()
+    
+    # 1. Calcula Top Faturamento
+    top = top_faturamento(d_uf)
+    # Criamos a string de exibição "Cod - Nome"
     top["val"] = top.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Calcular Produto da Vez (passando o top_fat para garantir que sejam diferentes)
-    hot = produto_vez(d, top)
-    hot = hot.groupby("Marca").head(1)
+    # 2. Calcula Produto da Vez (passando os resultados do 'top' para serem excluídos)
+    hot = produto_vez(d_uf, top)
     hot["val"] = hot.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Calcular Oportunidade
-    opp = oportunidade(d)
-    opp = opp.groupby("Marca").head(1)
+    # 3. Calcula Oportunidade
+    opp = oportunidade(d_uf)
     opp["val"] = opp.apply(lambda r: f"{r['Cod']} - {r['Produto']}", axis=1)
 
-    # Combinar os resultados
-    final = marcas.merge(top[["Marca", "val"]], on="Marca", how="left")
-    final = final.merge(hot[["Marca", "val"]], on="Marca", how="left")
+    # 4. Montagem da Tabela Final por Marca
+    marcas_base = pd.DataFrame({"Marca": MARCAS})
+    
+    # Fazemos os merges para unir as colunas
+    final = marcas_base.merge(top[["Marca", "val"]], on="Marca", how="left")
+    final = final.merge(hot[["Marca", "val"]], on="Marca", how="left", suffixes=("_top", "_hot"))
     final = final.merge(opp[["Marca", "val"]], on="Marca", how="left")
 
+    # Renomeia colunas para o Streamlit
     final.columns = [
         "Marca",
         "💰 Top Faturamento",
@@ -179,7 +178,10 @@ def render(uf):
         "💵 Oportunidade"
     ]
 
+    # Preenche o que estiver vazio com traço
     final = final.fillna("—")
+    
+    # Renderiza na tela
     st.dataframe(final, use_container_width=True, hide_index=True)
 
     return final
